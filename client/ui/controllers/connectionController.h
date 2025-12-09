@@ -40,6 +40,9 @@ public slots:
 
     void onTranslationsUpdated();
 
+private slots:
+    void onAwgStateTimeout();
+
 signals:
     void connectToVpn(int serverIndex, const ServerCredentials &credentials, DockerContainer container, const QJsonObject &vpnConfiguration);
     void disconnectFromVpn();
@@ -57,6 +60,7 @@ private:
 
     void continueConnection();
 
+    QTimer m_awgStateTimer;
     QSharedPointer<ServersModel> m_serversModel;
     QSharedPointer<ContainersModel> m_containersModel;
     QSharedPointer<ClientManagementModel> m_clientManagementModel;

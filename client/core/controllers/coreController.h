@@ -62,6 +62,9 @@ public:
                             QQmlApplicationEngine *engine, QObject *parent = nullptr);
 
     QSharedPointer<PageController> pageController() const;
+    QSharedPointer<ServersModel> serversModel() const { return m_serversModel; }
+    ConnectionController *connectionController() const { return m_connectionController.get(); }
+    ApiConfigsController *apiConfigsController() const { return m_apiConfigsController.data(); }
     void setQmlRoot();
 
     void openConnectionByIndex(int serverIndex);
