@@ -9,6 +9,7 @@
 #include "utilities.h"
 #include "amnezia_application.h"
 #include "core/controllers/vpnConfigurationController.h"
+#include "core/api/apiUtils.h"
 #include "containers/containers_defs.h"
 #include "protocols/protocols_defs.h"
 #include "version.h"
@@ -87,7 +88,9 @@ void ConnectionController::onConnectionStateChanged(Vpn::ConnectionState state)
     m_connectionStateText = tr("Connecting...");
     switch (state) {
     case Vpn::ConnectionState::Connected: {
-        m_awgStateTimer.stop();
+        if (m_awgStateTimer.isActive()) {
+            m_awgStateTimer.stop();
+        }
 
         m_isConnectionInProgress = false;
         m_isConnected = true;
@@ -98,15 +101,23 @@ void ConnectionController::onConnectionStateChanged(Vpn::ConnectionState state)
         {
             const int serverIndex = m_serversModel->getDefaultServerIndex();
             if (serverIndex >= 0) {
-                const QVariant containerVar =
-                        m_serversModel->data(serverIndex, ServersModel::Roles::DefaultContainerRole);
+                const QVariant containerVar = m_serversModel->data(serverIndex, ServersModel::Roles::DefaultContainerRole);
                 if (containerVar.isValid()) {
                     const DockerContainer container = qvariant_cast<DockerContainer>(containerVar);
                     const Proto proto = ContainerProps::defaultProtocol(container);
                     if (proto == Proto::Awg) {
-                        m_awgStateTimer.start(10000); // 10 seconds
+                        const QJsonObject serverConfig = m_serversModel->getServerConfig(serverIndex);
+                        if (apiUtils::isPremiumServer(serverConfig)) {
+                            m_awgStateTimer.start(10000);
+                        } else {
+                            if (m_awgStateTimer.isActive()) {
+                                m_awgStateTimer.stop();
+                            }
+                        }
                     } else {
-                        m_awgStateTimer.stop();
+                        if (m_awgStateTimer.isActive()) {
+                            m_awgStateTimer.stop();
+                        }
                     }
                 }
             }
@@ -116,38 +127,50 @@ void ConnectionController::onConnectionStateChanged(Vpn::ConnectionState state)
         break;
     }
     case Vpn::ConnectionState::Reconnecting: {
-        m_awgStateTimer.stop();
+        if (m_awgStateTimer.isActive()) {
+            m_awgStateTimer.stop();
+        }
         m_isConnectionInProgress = true;
         m_connectionStateText = tr("Reconnecting...");
         break;
     }
     case Vpn::ConnectionState::Disconnected: {
-        m_awgStateTimer.stop();
+        if (m_awgStateTimer.isActive()) {
+            m_awgStateTimer.stop();
+        }
         m_isConnectionInProgress = false;
         m_connectionStateText = tr("Connect");
         break;
     }
     case Vpn::ConnectionState::Disconnecting: {
-        m_awgStateTimer.stop();
+        if (m_awgStateTimer.isActive()) {
+            m_awgStateTimer.stop();
+        }
         m_isConnectionInProgress = true;
         m_connectionStateText = tr("Disconnecting...");
         break;
     }
     case Vpn::ConnectionState::Preparing: {
-        m_awgStateTimer.stop();
+        if (m_awgStateTimer.isActive()) {
+            m_awgStateTimer.stop();
+        }
         m_isConnectionInProgress = true;
         m_connectionStateText = tr("Preparing...");
         break;
     }
     case Vpn::ConnectionState::Error: {
-        m_awgStateTimer.stop();
+        if (m_awgStateTimer.isActive()) {
+            m_awgStateTimer.stop();
+        }
         m_isConnectionInProgress = false;
         m_connectionStateText = tr("Connect");
         emit connectionErrorOccurred(getLastConnectionError());
         break;
     }
     case Vpn::ConnectionState::Unknown: {
-        m_awgStateTimer.stop();
+        if (m_awgStateTimer.isActive()) {
+            m_awgStateTimer.stop();
+        }
         m_isConnectionInProgress = false;
         m_connectionStateText = tr("Connect");
         emit connectionErrorOccurred(getLastConnectionError());
@@ -168,8 +191,7 @@ void ConnectionController::onAwgStateTimeout()
         return;
     }
 
-    const QVariant containerVar =
-            m_serversModel->data(serverIndex, ServersModel::Roles::DefaultContainerRole);
+    const QVariant containerVar = m_serversModel->data(serverIndex, ServersModel::Roles::DefaultContainerRole);
     if (!containerVar.isValid()) {
         return;
     }
@@ -180,41 +202,67 @@ void ConnectionController::onAwgStateTimeout()
         return;
     }
 
-    const QJsonObject serverConfig = m_serversModel->getServerConfig(serverIndex);
-    const QJsonArray containers = serverConfig.value(config_key::containers).toArray();
-    bool hasXrayContainer = false;
-    for (const QJsonValue &value : containers) {
-        const QJsonObject obj = value.toObject();
-        const DockerContainer c =
-                ContainerProps::containerFromString(obj.value(config_key::container).toString());
-        if (c == DockerContainer::Xray) {
-            hasXrayContainer = true;
-            break;
-        }
-    }
-
-    if (!hasXrayContainer) {
-        qDebug().noquote() << "AWG connect timeout: no XRay container available for server index" << serverIndex;
-        return;
-    }
-
-    qDebug().noquote() << "AWG connect timeout (10s), switching default container to XRay for server index"
-                      << serverIndex << "and reconnecting";
-
-    m_serversModel->setDefaultContainer(serverIndex, static_cast<int>(DockerContainer::Xray));
-
-    if (auto app = amnApp) {
-        if (auto core = app->coreController()) {
-            if (auto api = core->apiConfigsController()) {
-                m_serversModel->setProcessedServerIndex(serverIndex);
-                api->setCurrentProtocol(QStringLiteral("vless"));
-            }
-        }
-    }
-
     closeConnection();
 
-    QTimer::singleShot(500, this, [this]() {
+    QTimer::singleShot(1000, this, [this, serverIndex]() {
+        if (m_isConnected || m_isConnectionInProgress) {
+            return;
+        }
+
+        const QJsonObject serverConfig = m_serversModel->getServerConfig(serverIndex);
+
+        bool apiSwitched = false;
+        bool hasXray = false;
+
+        if (auto app = amnApp) {
+            if (auto core = app->coreController()) {
+                if (auto api = core->apiConfigsController()) {
+                    qDebug().noquote()
+                        << "AWG connect timeout: trying to switch API protocol to VLESS"
+                        << "and reload config from gateway for premium server index" << serverIndex;
+
+                    m_serversModel->setProcessedServerIndex(serverIndex);
+                    api->setCurrentProtocol(QStringLiteral("vless"));
+                    apiSwitched = api->updateServiceFromGateway(serverIndex, QString(), QString(), true);
+
+                    if (apiSwitched) {
+                        const QJsonObject newServerConfig = m_serversModel->getServerConfig(serverIndex);
+                        const QJsonArray newContainers = newServerConfig.value(config_key::containers).toArray();
+                        for (const QJsonValue &value : newContainers) {
+                            const QJsonObject obj = value.toObject();
+                            const DockerContainer c =
+                                    ContainerProps::containerFromString(obj.value(config_key::container).toString());
+                            if (c == DockerContainer::Xray) {
+                                hasXray = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!hasXray) {
+            qDebug().noquote()
+                << "AWG connect timeout: no XRay available for server index" << serverIndex
+                << "(API switch attempt success =" << (apiSwitched ? "YES" : "NO") << ")";
+            return;
+        }
+
+        qDebug().noquote() << "AWG connect timeout (10s), switching default container to XRay for server index"
+                           << serverIndex << "and reconnecting";
+
+        m_serversModel->setDefaultContainer(serverIndex, static_cast<int>(DockerContainer::Xray));
+
+        if (auto app = amnApp) {
+            if (auto core = app->coreController()) {
+                if (auto api = core->apiConfigsController()) {
+                    m_serversModel->setProcessedServerIndex(serverIndex);
+                    api->setCurrentProtocol(QStringLiteral("vless"));
+                }
+            }
+        }
+
         if (!m_isConnected && !m_isConnectionInProgress) {
             emit prepareConfig();
         }
