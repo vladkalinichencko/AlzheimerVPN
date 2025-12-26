@@ -40,6 +40,7 @@ public slots:
 
     void setCurrentProtocol(const QString &protocolName);
     bool isVlessProtocol();
+    bool isAwgProtocol();
 
 signals:
     void errorOccurred(ErrorCode errorCode);

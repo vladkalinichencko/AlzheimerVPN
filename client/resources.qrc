@@ -250,6 +250,8 @@
         <file>ui/qml/Components/AwgTextField.qml</file>
         <file>ui/qml/Pages2/PageSettingsApiSubscriptionKey.qml</file>
         <file>ui/qml/Components/SmartScroll.qml</file>
+        <file>ui/qml/Pages2/PageSettingsConnectionType.qml</file>
+        <file>ui/qml/Pages2/PageSettingsConnectionProtocols.qml</file>
     </qresource>
     <qresource prefix="/countriesFlags">
         <file>images/flagKit/ZW.svg</file>

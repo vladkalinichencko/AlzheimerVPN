@@ -40,6 +40,8 @@ public slots:
 
     void onTranslationsUpdated();
 
+    void checkAndStartAwgStateTimer();
+
 private slots:
     void onAwgStateTimeout();
 

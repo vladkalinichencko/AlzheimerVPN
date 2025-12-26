@@ -14,6 +14,15 @@
 #include "protocols/protocols_defs.h"
 #include "version.h"
 
+namespace
+{
+    namespace configKey
+    {
+        constexpr char apiConfig[] = "api_config";
+        constexpr char serviceProtocol[] = "service_protocol";
+    }
+}
+
 ConnectionController::ConnectionController(const QSharedPointer<ServersModel> &serversModel,
                                            const QSharedPointer<ContainersModel> &containersModel,
                                            const QSharedPointer<ClientManagementModel> &clientManagementModel,
@@ -98,31 +107,7 @@ void ConnectionController::onConnectionStateChanged(Vpn::ConnectionState state)
         break;
     }
     case Vpn::ConnectionState::Connecting: {
-        {
-            const int serverIndex = m_serversModel->getDefaultServerIndex();
-            if (serverIndex >= 0) {
-                const QVariant containerVar = m_serversModel->data(serverIndex, ServersModel::Roles::DefaultContainerRole);
-                if (containerVar.isValid()) {
-                    const DockerContainer container = qvariant_cast<DockerContainer>(containerVar);
-                    const Proto proto = ContainerProps::defaultProtocol(container);
-                    if (proto == Proto::Awg) {
-                        const QJsonObject serverConfig = m_serversModel->getServerConfig(serverIndex);
-                        if (apiUtils::isPremiumServer(serverConfig)) {
-                            m_awgStateTimer.start(10000);
-                        } else {
-                            if (m_awgStateTimer.isActive()) {
-                                m_awgStateTimer.stop();
-                            }
-                        }
-                    } else {
-                        if (m_awgStateTimer.isActive()) {
-                            m_awgStateTimer.stop();
-                        }
-                    }
-                }
-            }
-        }
-
+        checkAndStartAwgStateTimer();
         m_isConnectionInProgress = true;
         break;
     }
@@ -319,4 +304,42 @@ bool ConnectionController::isConnectionInProgress() const
 bool ConnectionController::isConnected() const
 {
     return m_isConnected;
+}
+
+void ConnectionController::checkAndStartAwgStateTimer()
+{
+    const int serverIndex = m_serversModel->getDefaultServerIndex();
+    if (serverIndex < 0) {
+        return;
+    }
+
+    const QVariant containerVar = m_serversModel->data(serverIndex, ServersModel::Roles::DefaultContainerRole);
+    if (!containerVar.isValid()) {
+        return;
+    }
+
+    const DockerContainer container = qvariant_cast<DockerContainer>(containerVar);
+    const Proto proto = ContainerProps::defaultProtocol(container);
+    if (proto != Proto::Awg) {
+        if (m_awgStateTimer.isActive()) {
+            m_awgStateTimer.stop();
+        }
+        return;
+    }
+
+    const QJsonObject serverConfig = m_serversModel->getServerConfig(serverIndex);
+
+    // Auto-switching only works in auto mode, not when protocol is explicitly selected
+    const QJsonObject apiConfig = serverConfig.value(configKey::apiConfig).toObject();
+    const QString serviceProtocol = apiConfig.value(configKey::serviceProtocol).toString();
+    // Auto mode: empty serviceProtocol means use default protocol (AWG for AWG container)
+    const bool isAutoMode = serviceProtocol.isEmpty();
+    
+    if (isAutoMode && apiUtils::isPremiumServer(serverConfig)) {
+        m_awgStateTimer.start(10000);
+    } else {
+        if (m_awgStateTimer.isActive()) {
+            m_awgStateTimer.stop();
+        }
+    }
 }

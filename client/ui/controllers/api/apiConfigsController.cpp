@@ -882,6 +882,18 @@ bool ApiConfigsController::isVlessProtocol()
     return false;
 }
 
+bool ApiConfigsController::isAwgProtocol()
+{
+    auto serverIndex = m_serversModel->getProcessedServerIndex();
+    auto serverConfigObject = m_serversModel->getServerConfig(serverIndex);
+    auto apiConfigObject = serverConfigObject.value(configKey::apiConfig).toObject();
+
+    if (apiConfigObject[configKey::serviceProtocol].toString() == "awg") {
+        return true;
+    }
+    return false;
+}
+
 QList<QString> ApiConfigsController::getQrCodes()
 {
     return m_qrCodes;
