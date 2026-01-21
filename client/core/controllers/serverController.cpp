@@ -94,6 +94,25 @@ ErrorCode ServerController::runScript(const ServerCredentials &credentials, QStr
     return ErrorCode::NoError;
 }
 
+ErrorCode ServerController::runHostScript(const ServerCredentials &credentials, QString script,
+                                          const std::function<ErrorCode(const QString &, libssh::Client &)> &cbReadStdOut,
+                                          const std::function<ErrorCode(const QString &, libssh::Client &)> &cbReadStdErr)
+{
+    QString fileName = "/tmp/amnezia_" + Utils::getRandomString(16) + ".sh";
+
+    ErrorCode e = uploadFileToHost(credentials, script.toUtf8(), fileName);
+    if (e)
+        return e;
+
+    QString runner = QString("sudo bash %1").arg(fileName);
+    e = runScript(credentials, runner, cbReadStdOut, cbReadStdErr);
+
+    QString remover = QString("sudo rm -f %1").arg(fileName);
+    runScript(credentials, remover, cbReadStdOut, cbReadStdErr);
+
+    return e;
+}
+
 ErrorCode ServerController::runContainerScript(const ServerCredentials &credentials, DockerContainer container, QString script,
                                                const std::function<ErrorCode(const QString &, libssh::Client &)> &cbReadStdOut,
                                                const std::function<ErrorCode(const QString &, libssh::Client &)> &cbReadStdErr)
@@ -203,6 +222,37 @@ ErrorCode ServerController::uploadFileToHost(const ServerCredentials &credential
     localFile.close();
 
     error = m_sshClient.scpFileCopy(overwriteMode, localFile.fileName(), remotePath, "non_desc");
+
+    if (error != ErrorCode::NoError) {
+        return error;
+    }
+    return ErrorCode::NoError;
+}
+
+ErrorCode ServerController::downloadFileFromHost(const ServerCredentials &credentials, const QString &remotePath, const QString &localPath)
+{
+    auto error = m_sshClient.connectToHost(credentials);
+    if (error != ErrorCode::NoError) {
+        return error;
+    }
+
+    error = m_sshClient.scpFileDownload(remotePath, localPath);
+
+    if (error != ErrorCode::NoError) {
+        return error;
+    }
+    return ErrorCode::NoError;
+}
+
+ErrorCode ServerController::uploadFileToHostPublic(const ServerCredentials &credentials, const QString &localPath, const QString &remotePath,
+                                                   libssh::ScpOverwriteMode overwriteMode)
+{
+    auto error = m_sshClient.connectToHost(credentials);
+    if (error != ErrorCode::NoError) {
+        return error;
+    }
+
+    error = m_sshClient.scpFileCopy(overwriteMode, localPath, remotePath, "backup_file");
 
     if (error != ErrorCode::NoError) {
         return error;

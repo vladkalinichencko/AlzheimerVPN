@@ -46,6 +46,10 @@ public:
                         const std::function<ErrorCode(const QString &, libssh::Client &)> &cbReadStdOut = nullptr,
                         const std::function<ErrorCode(const QString &, libssh::Client &)> &cbReadStdErr = nullptr);
 
+    ErrorCode runHostScript(const ServerCredentials &credentials, QString script,
+                            const std::function<ErrorCode(const QString &, libssh::Client &)> &cbReadStdOut = nullptr,
+                            const std::function<ErrorCode(const QString &, libssh::Client &)> &cbReadStdErr = nullptr);
+
     ErrorCode runContainerScript(const ServerCredentials &credentials, DockerContainer container, QString script,
                                  const std::function<ErrorCode(const QString &, libssh::Client &)> &cbReadStdOut = nullptr,
                                  const std::function<ErrorCode(const QString &, libssh::Client &)> &cbReadStdErr = nullptr);
@@ -56,6 +60,10 @@ public:
 
     ErrorCode getDecryptedPrivateKey(const ServerCredentials &credentials, QString &decryptedPrivateKey,
                                      const std::function<QString()> &callback);
+
+    ErrorCode downloadFileFromHost(const ServerCredentials &credentials, const QString &remotePath, const QString &localPath);
+    ErrorCode uploadFileToHostPublic(const ServerCredentials &credentials, const QString &localPath, const QString &remotePath,
+                                     libssh::ScpOverwriteMode overwriteMode = libssh::ScpOverwriteMode::ScpOverwriteExisting);
 
 private:
     ErrorCode installDockerWorker(const ServerCredentials &credentials, DockerContainer container);

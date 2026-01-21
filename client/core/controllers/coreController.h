@@ -22,6 +22,7 @@
 #include "ui/controllers/installController.h"
 #include "ui/controllers/pageController.h"
 #include "ui/controllers/settingsController.h"
+#include "ui/controllers/serversBackupController.h"
 #include "ui/controllers/sitesController.h"
 #include "ui/controllers/systemController.h"
 
@@ -115,6 +116,7 @@ private:
     QScopedPointer<ImportController> m_importController;
     QScopedPointer<ExportController> m_exportController;
     QScopedPointer<SettingsController> m_settingsController;
+    QScopedPointer<ServersBackupController> m_serversBackupController;
     QScopedPointer<SitesController> m_sitesController;
     QScopedPointer<SystemController> m_systemController;
     QScopedPointer<AppSplitTunnelingController> m_appSplitTunnelingController;

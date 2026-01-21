@@ -135,6 +135,9 @@ void CoreController::initControllers()
             new SettingsController(m_serversModel, m_containersModel, m_languageModel, m_sitesModel, m_appSplitTunnelingModel, m_settings));
     m_engine->rootContext()->setContextProperty("SettingsController", m_settingsController.get());
 
+    m_serversBackupController.reset(new ServersBackupController(m_settings));
+    m_engine->rootContext()->setContextProperty("ServersBackupController", m_serversBackupController.get());
+
     m_sitesController.reset(new SitesController(m_settings, m_vpnConnection, m_sitesModel));
     m_engine->rootContext()->setContextProperty("SitesController", m_sitesController.get());
 
