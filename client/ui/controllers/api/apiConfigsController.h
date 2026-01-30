@@ -49,6 +49,7 @@ signals:
     void changeApiCountryFinished(const QString &message);
     void reloadServerFromApiFinished(const QString &message);
     void updateServerFromApiFinished();
+    void updateServiceFromGatewayCompleted(bool success, int serverIndex);
 
     void vpnKeyExportReady();
 

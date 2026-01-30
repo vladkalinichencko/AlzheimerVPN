@@ -7,7 +7,6 @@
 #endif
 
 #include "utilities.h"
-#include "amnezia_application.h"
 #include "core/controllers/vpnConfigurationController.h"
 #include "core/api/apiUtils.h"
 #include "containers/containers_defs.h"
@@ -194,63 +193,21 @@ void ConnectionController::onAwgStateTimeout()
             return;
         }
 
-        const QJsonObject serverConfig = m_serversModel->getServerConfig(serverIndex);
+        qDebug().noquote()
+            << "AWG connect timeout: trying to switch API protocol to VLESS"
+            << "and reload config from gateway for premium server index" << serverIndex;
 
-        bool apiSwitched = false;
-        bool hasXray = false;
+        // Store state for async operation
+        m_pendingApiServerIndex = serverIndex;
+        m_apiSwitched = false;
+        m_waitingForApiUpdate = true;
 
-        if (auto app = amnApp) {
-            if (auto core = app->coreController()) {
-                if (auto api = core->apiConfigsController()) {
-                    qDebug().noquote()
-                        << "AWG connect timeout: trying to switch API protocol to VLESS"
-                        << "and reload config from gateway for premium server index" << serverIndex;
-
-                    m_serversModel->setProcessedServerIndex(serverIndex);
-                    api->setCurrentProtocol(QStringLiteral("vless"));
-                    apiSwitched = api->updateServiceFromGateway(serverIndex, QString(), QString(), true);
-
-                    if (apiSwitched) {
-                        const QJsonObject newServerConfig = m_serversModel->getServerConfig(serverIndex);
-                        const QJsonArray newContainers = newServerConfig.value(config_key::containers).toArray();
-                        for (const QJsonValue &value : newContainers) {
-                            const QJsonObject obj = value.toObject();
-                            const DockerContainer c =
-                                    ContainerProps::containerFromString(obj.value(config_key::container).toString());
-                            if (c == DockerContainer::Xray) {
-                                hasXray = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if (!hasXray) {
-            qDebug().noquote()
-                << "AWG connect timeout: no XRay available for server index" << serverIndex
-                << "(API switch attempt success =" << (apiSwitched ? "YES" : "NO") << ")";
-            return;
-        }
-
-        qDebug().noquote() << "AWG connect timeout (10s), switching default container to XRay for server index"
-                           << serverIndex << "and reconnecting";
-
-        m_serversModel->setDefaultContainer(serverIndex, static_cast<int>(DockerContainer::Xray));
-
-        if (auto app = amnApp) {
-            if (auto core = app->coreController()) {
-                if (auto api = core->apiConfigsController()) {
-                    m_serversModel->setProcessedServerIndex(serverIndex);
-                    api->setCurrentProtocol(QStringLiteral("vless"));
-                }
-            }
-        }
-
-        if (!m_isConnected && !m_isConnectionInProgress) {
-            emit prepareConfig();
-        }
+        m_serversModel->setProcessedServerIndex(serverIndex);
+        
+        emit requestSetCurrentProtocol(QStringLiteral("vless"));
+        emit requestUpdateServiceFromGateway(serverIndex, QString(), QString(), true);
+        
+        return;
     });
 }
 
@@ -304,6 +261,53 @@ bool ConnectionController::isConnectionInProgress() const
 bool ConnectionController::isConnected() const
 {
     return m_isConnected;
+}
+
+void ConnectionController::onUpdateServiceFromGatewayCompleted(bool success, int serverIndex)
+{
+    if (!m_waitingForApiUpdate || m_pendingApiServerIndex != serverIndex) {
+        return;
+    }
+
+    m_waitingForApiUpdate = false;
+    m_apiSwitched = success;
+    bool hasXray = false;
+
+    if (success) {
+        const QJsonObject newServerConfig = m_serversModel->getServerConfig(serverIndex);
+        const QJsonArray newContainers = newServerConfig.value(config_key::containers).toArray();
+        for (const QJsonValue &value : newContainers) {
+            const QJsonObject obj = value.toObject();
+            const DockerContainer c =
+                    ContainerProps::containerFromString(obj.value(config_key::container).toString());
+            if (c == DockerContainer::Xray) {
+                hasXray = true;
+                break;
+            }
+        }
+    }
+
+    if (!hasXray) {
+        qDebug().noquote()
+            << "AWG connect timeout: no XRay available for server index" << serverIndex
+            << "(API switch attempt success =" << (m_apiSwitched ? "YES" : "NO") << ")";
+        m_pendingApiServerIndex = -1;
+        return;
+    }
+
+    qDebug().noquote() << "AWG connect timeout (10s), switching default container to XRay for server index"
+                       << serverIndex << "and reconnecting";
+
+    m_serversModel->setDefaultContainer(serverIndex, static_cast<int>(DockerContainer::Xray));
+
+    m_serversModel->setProcessedServerIndex(serverIndex);
+    emit requestSetCurrentProtocol(QStringLiteral("vless"));
+
+    m_pendingApiServerIndex = -1;
+
+    if (!m_isConnected && !m_isConnectionInProgress) {
+        emit prepareConfig();
+    }
 }
 
 void ConnectionController::checkAndStartAwgStateTimer()

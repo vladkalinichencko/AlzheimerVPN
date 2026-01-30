@@ -125,6 +125,15 @@ void CoreController::initControllers()
     connect(m_installController.get(), &InstallController::profileCleared,
             m_protocolsModel.get(), &ProtocolsModel::updateModel);
 
+    connect(m_connectionController.get(), &ConnectionController::requestSetCurrentProtocol,
+            m_apiConfigsController.get(), &ApiConfigsController::setCurrentProtocol, Qt::QueuedConnection);
+    connect(m_connectionController.get(), &ConnectionController::requestUpdateServiceFromGateway,
+            m_apiConfigsController.get(), &ApiConfigsController::updateServiceFromGateway, Qt::QueuedConnection);
+
+    connect(m_apiConfigsController.get(), &ApiConfigsController::updateServiceFromGatewayCompleted,
+            m_connectionController.get(), &ConnectionController::onUpdateServiceFromGatewayCompleted,
+            Qt::QueuedConnection);
+
     m_importController.reset(new ImportController(m_serversModel, m_containersModel, m_settings));
     m_engine->rootContext()->setContextProperty("ImportController", m_importController.get());
 

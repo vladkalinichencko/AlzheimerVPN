@@ -709,9 +709,11 @@ bool ApiConfigsController::updateServiceFromGateway(const int serverIndex, const
         } else {
             emit changeApiCountryFinished(tr("Successfully changed the country of connection to %1").arg(newCountryName));
         }
+        emit updateServiceFromGatewayCompleted(true, serverIndex);
         return true;
     } else {
         emit errorOccurred(errorCode);
+        emit updateServiceFromGatewayCompleted(false, serverIndex);
         return false;
     }
 }
