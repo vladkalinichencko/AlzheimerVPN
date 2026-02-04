@@ -31,6 +31,10 @@ PageType {
         function onGoToPageSettingsServerServices() {
             tabBar.setCurrentIndex(root.pageSettingsServerServices)
         }
+        
+        function onGoToPageSettingsServerManagement() {
+            tabBar.setCurrentIndex(root.pageSettingsServerData)
+        }
     }
 
     Connections {

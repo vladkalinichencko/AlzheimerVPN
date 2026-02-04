@@ -208,6 +208,9 @@
         <file>ui/qml/Pages2/PageSettingsApplication.qml</file>
         <file>ui/qml/Pages2/PageSettingsAppSplitTunneling.qml</file>
         <file>ui/qml/Pages2/PageSettingsBackup.qml</file>
+        <file>ui/qml/Pages2/PageSettingsServerBackup.qml</file>
+        <file>ui/qml/Pages2/PageSettingsServerRestoreMode.qml</file>
+        <file>ui/qml/Pages2/PageSettingsServerBackupRestored.qml</file>
         <file>ui/qml/Pages2/PageSettingsConnection.qml</file>
         <file>ui/qml/Pages2/PageSettingsDns.qml</file>
         <file>ui/qml/Pages2/PageSettingsKillSwitch.qml</file>

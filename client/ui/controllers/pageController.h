@@ -29,6 +29,9 @@ namespace PageLoader
         PageSettingsNewsNotifications,
         PageSettingsNewsDetail,
         PageSettingsBackup,
+        PageSettingsServerBackup,
+        PageSettingsServerRestoreMode,
+        PageSettingsServerBackupRestored,
         PageSettingsAbout,
         PageSettingsLogging,
         PageSettingsSplitTunneling,
@@ -126,6 +129,7 @@ signals:
     void goToPageSettings();
     void goToPageViewConfig();
     void goToPageSettingsServerServices();
+    void goToPageSettingsServerManagement();
     void goToPageSettingsBackup();
     void goToShareConnectionPage(QString headerText, QString configContentHeaderText, QString configCaption, QString configExtension,
                                  QString configFileName);
