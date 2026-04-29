@@ -1,12 +1,12 @@
 #include <QDebug>
 #include <QTimer>
+#include <QLocalSocket>
 
 #include "amneziaApplication.h"
 #include "core/utils/osSignalHandler.h"
 #include "core/utils/migrations.h"
 #include "version.h"
 
-#include <QTimer>
 
 #ifdef Q_OS_WIN
     #include "Windows.h"
