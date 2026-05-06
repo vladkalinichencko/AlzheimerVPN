@@ -60,6 +60,7 @@ public:
     virtual bool isDisconnected() const;
     virtual ErrorCode start() = 0;
     virtual void stop() = 0;
+    virtual ErrorCode switchServer(const QJsonObject &newConfig);
 
     Vpn::ConnectionState connectionState() const;
     ErrorCode lastError() const;

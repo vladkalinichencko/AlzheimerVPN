@@ -160,3 +160,10 @@ bool VpnProtocol::isDisconnected() const
 {
     return m_connectionState == Vpn::ConnectionState::Disconnected;
 }
+
+ErrorCode VpnProtocol::switchServer(const QJsonObject &newConfig)
+{
+    stop();
+    m_rawConfig = newConfig;
+    return start();
+}

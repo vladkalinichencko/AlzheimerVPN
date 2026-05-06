@@ -197,6 +197,21 @@ void VpnConnection::connectToVpn(int serverIndex, DockerContainer container, con
     }
 }
 
+void VpnConnection::switchToVpn(int serverIndex, DockerContainer container, const QJsonObject &vpnConfiguration)
+{
+    if (!m_vpnProtocol.isNull() && ContainerUtils::isAwgContainer(container) && m_connectionState == Vpn::ConnectionState::Connected) {
+        m_remoteAddress = NetworkUtilities::getIPAddress(vpnConfiguration.value(configKey::hostName).toString());
+        m_trafficGuard->allowEndpoint(m_remoteAddress);
+        m_vpnConfiguration = vpnConfiguration;
+        appendKillSwitchConfig();
+        appendSplitTunnelingConfig();
+        m_trafficGuard->setConfig(m_vpnConfiguration);
+        m_vpnProtocol->switchServer(m_vpnConfiguration);
+    } else {
+        connectToVpn(serverIndex, container, vpnConfiguration);
+    }
+}
+
 void VpnConnection::createProtocolConnections()
 {
     connect(m_vpnProtocol.data(), &VpnProtocol::protocolError, this, &VpnConnection::vpnProtocolError);

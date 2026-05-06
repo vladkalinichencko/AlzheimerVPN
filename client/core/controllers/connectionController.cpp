@@ -31,6 +31,7 @@ ConnectionController::ConnectionController(SecureServersRepository* serversRepos
 {
     connect(m_vpnConnection, &VpnConnection::connectionStateChanged, this, &ConnectionController::connectionStateChanged);
     connect(this, &ConnectionController::openConnectionRequested, m_vpnConnection, &VpnConnection::connectToVpn, Qt::QueuedConnection);
+    connect(this, &ConnectionController::switchConnectionRequested, m_vpnConnection, &VpnConnection::switchToVpn, Qt::QueuedConnection);
     connect(this, &ConnectionController::closeConnectionRequested, m_vpnConnection, &VpnConnection::disconnectFromVpn, Qt::QueuedConnection);
     connect(this, &ConnectionController::setConnectionStateRequested, m_vpnConnection, &VpnConnection::setConnectionState, Qt::QueuedConnection);
     connect(this, &ConnectionController::killSwitchModeChangedRequested, m_vpnConnection, &VpnConnection::onKillSwitchModeChanged, Qt::QueuedConnection);
@@ -86,8 +87,11 @@ ErrorCode ConnectionController::openConnection(int serverIndex)
     if (errorCode != ErrorCode::NoError) {
         return errorCode;
     }
-
-    emit openConnectionRequested(serverIndex, container, vpnConfiguration);
+    if (isConnected()) {
+        emit switchConnectionRequested(serverIndex, container, vpnConfiguration);
+    } else {
+        emit openConnectionRequested(serverIndex, container, vpnConfiguration);
+    }
     return ErrorCode::NoError;
 }
 

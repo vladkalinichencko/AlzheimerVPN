@@ -501,9 +501,7 @@ bool Daemon::supportServerSwitching(const InterfaceConfig& config) const {
 
   return current.m_privateKey == config.m_privateKey &&
          current.m_deviceIpv4Address == config.m_deviceIpv4Address &&
-         current.m_deviceIpv6Address == config.m_deviceIpv6Address &&
-         current.m_serverIpv4Gateway == config.m_serverIpv4Gateway &&
-         current.m_serverIpv6Gateway == config.m_serverIpv6Gateway;
+         current.m_deviceIpv6Address == config.m_deviceIpv6Address;
 }
 
 bool Daemon::switchServer(const InterfaceConfig& config) {

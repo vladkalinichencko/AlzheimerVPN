@@ -24,6 +24,7 @@ public:
 
     ErrorCode startMzImpl();
     ErrorCode stopMzImpl();
+    ErrorCode switchServer(const QJsonObject &newConfig);
 
 private:
 

@@ -79,3 +79,9 @@ ErrorCode WireguardProtocol::start()
 {
     return startMzImpl();
 }
+
+ErrorCode WireguardProtocol::switchServer(const QJsonObject &newConfig)
+{
+    m_rawConfig = newConfig;
+    return startMzImpl();
+}

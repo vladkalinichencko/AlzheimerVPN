@@ -421,7 +421,23 @@ ErrorCode SubscriptionController::updateServiceFromGateway(int serverIndex, cons
     }
     const bool isTestPurchase = apiV2->apiConfig.isTestPurchase;
     QString serviceProtocol = apiV2->serviceProtocol();
-    ProtocolData protocolData = generateProtocolData(serviceProtocol);
+    ProtocolData protocolData;
+    if (serviceProtocol == configKey::awg && !isConnectEvent) {
+        DockerContainer container = apiV2->defaultContainer;
+        ContainerConfig containerConfig = apiV2->containerConfig(container);
+        AwgProtocolConfig* awgConfig = containerConfig.protocolConfig.as<AwgProtocolConfig>();
+        if (awgConfig && awgConfig->hasClientConfig()) {
+            AwgClientConfig clientConfig = awgConfig->clientConfig.value();
+            QString clientPrivKey = clientConfig.clientPrivateKey;
+            QString clientPubKey = clientConfig.clientPublicKey;
+            protocolData.wireGuardClientPubKey = clientPubKey;
+            protocolData.wireGuardClientPrivKey = clientPrivKey;
+        } else {
+            protocolData = generateProtocolData(serviceProtocol);
+        }
+    } else {
+        protocolData = generateProtocolData(serviceProtocol);
+    }
     
     QJsonObject authDataJson = apiV2->authData.toJson();
     GatewayRequestData gatewayRequestData { QSysInfo::productType(),
