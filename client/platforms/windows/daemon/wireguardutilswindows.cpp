@@ -20,6 +20,34 @@
 
 namespace {
 Logger logger("WireguardUtilsWindows");
+
+bool appendAwgInterfaceParams(const InterfaceConfig& config, QTextStream& out) {
+  bool hasParams = false;
+  const auto appendField = [&](const char* key, const QString& value) {
+    if (!value.isEmpty()) {
+      out << key << "=" << value << "\n";
+      hasParams = true;
+    }
+  };
+
+  appendField("jc", config.m_junkPacketCount);
+  appendField("jmin", config.m_junkPacketMinSize);
+  appendField("jmax", config.m_junkPacketMaxSize);
+  appendField("s1", config.m_initPacketJunkSize);
+  appendField("s2", config.m_responsePacketJunkSize);
+  appendField("s3", config.m_cookieReplyPacketJunkSize);
+  appendField("s4", config.m_transportPacketJunkSize);
+  appendField("h1", config.m_initPacketMagicHeader);
+  appendField("h2", config.m_responsePacketMagicHeader);
+  appendField("h3", config.m_underloadPacketMagicHeader);
+  appendField("h4", config.m_transportPacketMagicHeader);
+
+  for (const QString& key : config.m_specialJunk.keys()) {
+    out << key.toLower() << "=" << config.m_specialJunk.value(key) << "\n";
+    hasParams = true;
+  }
+  return hasParams;
+}
 };  // namespace
 
 std::unique_ptr<WireguardUtilsWindows> WireguardUtilsWindows::create(
@@ -165,6 +193,7 @@ bool WireguardUtilsWindows::updatePeer(const InterfaceConfig& config) {
   QString message;
   QTextStream out(&message);
   out << "set=1\n";
+  appendAwgInterfaceParams(config, out);
   out << "public_key=" << QString(publicKey.toHex()) << "\n";
   if (!config.m_serverPskKey.isNull()) {
     out << "preshared_key=" << QString(pskKey.toHex()) << "\n";

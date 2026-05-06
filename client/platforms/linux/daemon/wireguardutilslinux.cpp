@@ -25,6 +25,34 @@ constexpr const char* WG_RUNTIME_DIR = "/var/run/amneziawg";
 namespace {
 Logger logger("WireguardUtilsLinux");
 Logger logwireguard("WireguardGo");
+
+bool appendAwgInterfaceParams(const InterfaceConfig& config, QTextStream& out) {
+    bool hasParams = false;
+    const auto appendField = [&](const char* key, const QString& value) {
+        if (!value.isEmpty()) {
+            out << key << "=" << value << "\n";
+            hasParams = true;
+        }
+    };
+
+    appendField("jc", config.m_junkPacketCount);
+    appendField("jmin", config.m_junkPacketMinSize);
+    appendField("jmax", config.m_junkPacketMaxSize);
+    appendField("s1", config.m_initPacketJunkSize);
+    appendField("s2", config.m_responsePacketJunkSize);
+    appendField("s3", config.m_cookieReplyPacketJunkSize);
+    appendField("s4", config.m_transportPacketJunkSize);
+    appendField("h1", config.m_initPacketMagicHeader);
+    appendField("h2", config.m_responsePacketMagicHeader);
+    appendField("h3", config.m_underloadPacketMagicHeader);
+    appendField("h4", config.m_transportPacketMagicHeader);
+
+    for (const QString& key : config.m_specialJunk.keys()) {
+        out << key.toLower() << "=" << config.m_specialJunk.value(key) << "\n";
+        hasParams = true;
+    }
+    return hasParams;
+}
 };  // namespace
 
 WireguardUtilsLinux::WireguardUtilsLinux(QObject* parent)
@@ -59,7 +87,6 @@ void WireguardUtilsLinux::tunnelErrorOccurred(QProcess::ProcessError error) {
 }
 
 bool WireguardUtilsLinux::addInterface(const InterfaceConfig& config) {
-    Q_UNUSED(config);
     if (m_tunnel.state() != QProcess::NotRunning) {
         logger.warning() << "Unable to start: tunnel process already running";
         return false;
@@ -104,45 +131,7 @@ bool WireguardUtilsLinux::addInterface(const InterfaceConfig& config) {
     QTextStream out(&message);
     out << "private_key=" << QString(privateKey.toHex()) << "\n";
     out << "replace_peers=true\n";
-
-
-    if (!config.m_junkPacketCount.isEmpty()) {
-        out << "jc=" << config.m_junkPacketCount << "\n";
-    }
-    if (!config.m_junkPacketMinSize.isEmpty()) {
-        out << "jmin=" << config.m_junkPacketMinSize << "\n";
-    }
-    if (!config.m_junkPacketMaxSize.isEmpty()) {
-        out << "jmax=" << config.m_junkPacketMaxSize << "\n";
-    }
-    if (!config.m_initPacketJunkSize.isEmpty()) {
-        out << "s1=" << config.m_initPacketJunkSize << "\n";
-    }
-    if (!config.m_responsePacketJunkSize.isEmpty()) {
-        out << "s2=" << config.m_responsePacketJunkSize << "\n";
-    }
-    if (!config.m_cookieReplyPacketJunkSize.isEmpty()) {
-        out << "s3=" << config.m_cookieReplyPacketJunkSize << "\n";
-    }
-    if (!config.m_transportPacketJunkSize.isEmpty()) {
-        out << "s4=" << config.m_transportPacketJunkSize << "\n";
-    }
-    if (!config.m_initPacketMagicHeader.isEmpty()) {
-        out << "h1=" << config.m_initPacketMagicHeader << "\n";
-    }
-    if (!config.m_responsePacketMagicHeader.isEmpty()) {
-        out << "h2=" << config.m_responsePacketMagicHeader << "\n";
-    }
-    if (!config.m_underloadPacketMagicHeader.isEmpty()) {
-        out << "h3=" << config.m_underloadPacketMagicHeader << "\n";
-    }
-    if (!config.m_transportPacketMagicHeader.isEmpty()) {
-        out << "h4=" << config.m_transportPacketMagicHeader << "\n";
-    }
-
-    for (const QString& key : config.m_specialJunk.keys()) {
-        out << key.toLower() << "=" << config.m_specialJunk.value(key) << "\n";
-    }
+    appendAwgInterfaceParams(config, out);
 
     int err = uapiErrno(uapiCommand(message));
     if (err != 0) {
@@ -201,7 +190,6 @@ bool WireguardUtilsLinux::deleteInterface() {
     return true;
 }
 
-// dummy implementations for now
 bool WireguardUtilsLinux::updatePeer(const InterfaceConfig& config) {
     QByteArray publicKey =
         QByteArray::fromBase64(qPrintable(config.m_serverPublicKey));
@@ -214,6 +202,7 @@ bool WireguardUtilsLinux::updatePeer(const InterfaceConfig& config) {
     QString message;
     QTextStream out(&message);
     out << "set=1\n";
+    appendAwgInterfaceParams(config, out);
     out << "public_key=" << QString(publicKey.toHex()) << "\n";
     if (!config.m_serverPskKey.isNull()) {
         out << "preshared_key=" << QString(pskKey.toHex()) << "\n";
