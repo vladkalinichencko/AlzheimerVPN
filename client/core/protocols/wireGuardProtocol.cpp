@@ -92,6 +92,11 @@ ErrorCode WireguardProtocol::stopMzImpl()
     return ErrorCode::NoError;
 }
 
+void WireguardProtocol::setPrimary(const QJsonObject& config)
+{
+    m_impl->setPrimary(config);
+}
+
 void WireguardProtocol::activateStaging(const QJsonObject& config, const QString& stagingIfname)
 {
     m_impl->activateStaging(config, stagingIfname);

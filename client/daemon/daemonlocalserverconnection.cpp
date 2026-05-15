@@ -113,8 +113,7 @@ void DaemonLocalServerConnection::parseCommand(const QByteArray& data) {
       return;
     }
     m_responseStyle[config.m_ifname] = ResponseStyle::LegacyActive;
-    if (!Daemon::instance()->activate(config.m_ifname, config) ||
-        !Daemon::instance()->setPrimary(config.m_ifname, config)) {
+    if (!Daemon::instance()->activate(config.m_ifname, config)) {
       logger.error() << "Failed to activate the interface";
       Daemon::instance()->deactivateTunnel(config.m_ifname);
       m_responseStyle.remove(config.m_ifname);

@@ -24,6 +24,7 @@ void Tunnel::prepare() {
 
     setState(State::Preparing);
 
+    m_config.insert("ifname", m_ifname);
     m_protocol.reset(VpnProtocol::factory(m_container, m_config));
     if (!m_protocol) {
         setState(State::Failed);
@@ -53,6 +54,9 @@ void Tunnel::commit() {
         return;
     }
     setState(State::Committing);
+    if (m_protocol) {
+        m_protocol->setPrimary(m_config);
+    }
     setState(State::Active);
     emit activated();
 }
