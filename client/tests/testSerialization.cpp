@@ -7,7 +7,7 @@
 #include <QTest>
 
 #include "core/controllers/coreController.h"
-#include "core/models/serverConfig.h"
+#include "core/models/serverDescription.h"
 #include "core/utils/serialization/serialization.h"
 #include "core/utils/utilities.h"
 #include "secureQSettings.h"
@@ -95,11 +95,12 @@ private slots:
     void cleanupTestCase()
     {
         int serverIndex = m_coreController->m_serversRepository->defaultServerIndex();
+        const QString serverId = m_coreController->m_serversRepository->serverIdAt(serverIndex);
 
         for (int containerIndex = 1; containerIndex < 7; ++containerIndex)
-            m_coreController->m_installUiController->clearCachedProfile(serverIndex, containerIndex);
+            m_coreController->m_installUiController->clearCachedProfile(serverId, containerIndex);
 
-        m_coreController->m_serversController->removeServer(serverIndex);
+        m_coreController->m_serversController->removeServer(serverId);
 
         qDebug() << "SERVER REMOVED\n";
 
@@ -112,17 +113,18 @@ private slots:
     {
         m_settings->clearSettings();
         if (m_coreController->m_serversModel) {
-            m_coreController->m_serversModel->updateModel(QVector<ServerConfig>(), -1, false);
+            m_coreController->m_serversModel->updateModel(QVector<ServerDescription>(), -1);
         }
     }
 
     void testVless()
     {
         int serverIndex = m_coreController->m_serversRepository->defaultServerIndex();
+        const QString serverId = m_coreController->m_serversRepository->serverIdAt(serverIndex);
 
         QString clientName = "Test Client (vless (de)serialization)";
 
-        ExportController::ExportResult exportResult = m_coreController->m_exportController->generateXrayConfig(serverIndex, clientName);
+        ExportController::ExportResult exportResult = m_coreController->m_exportController->generateXrayConfig(serverId, clientName);
 
         ImportController::ImportResult importResult;
 

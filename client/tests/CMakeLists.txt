@@ -80,6 +80,15 @@ target_link_libraries(test_server_edge_cases PRIVATE
     test_common
 )
 
+add_executable(test_gateway_stacks
+    testGatewayStacks.cpp
+)
+
+target_link_libraries(test_gateway_stacks PRIVATE
+    Qt6::Test
+    test_common
+)
+
 add_executable(test_signal_order
     testSignalOrder.cpp
 )
@@ -94,15 +103,6 @@ add_executable(test_servers_model_sync
 )
 
 target_link_libraries(test_servers_model_sync PRIVATE
-    Qt6::Test
-    test_common
-)
-
-add_executable(test_gateway_stacks
-    testGatewayStacks.cpp
-)
-
-target_link_libraries(test_gateway_stacks PRIVATE
     Qt6::Test
     test_common
 )
@@ -212,9 +212,9 @@ add_test(NAME MultipleImportsTest COMMAND test_multiple_imports)
 add_test(NAME ServerEditTest COMMAND test_server_edit)
 add_test(NAME DefaultServerChangeTest COMMAND test_default_server_change)
 add_test(NAME ServerEdgeCasesTest COMMAND test_server_edge_cases)
+add_test(NAME GatewayStacksTest COMMAND test_gateway_stacks)
 add_test(NAME SignalOrderTest COMMAND test_signal_order)
 add_test(NAME ServersModelSyncTest COMMAND test_servers_model_sync)
-add_test(NAME GatewayStacksTest COMMAND test_gateway_stacks)
 add_test(NAME ComplexOperationsTest COMMAND test_complex_operations)
 add_test(NAME SettingsSignalsTest COMMAND test_settings_signals)
 add_test(NAME UiServersModelAndControllerTest COMMAND test_ui_servers_model_and_controller)
