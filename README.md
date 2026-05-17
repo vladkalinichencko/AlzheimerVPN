@@ -1,59 +1,76 @@
 # AlzheimerVPN
 
-AlzheimerVPN is an experimental fork of AmneziaVPN focused on making split tunneling less forgetful.
+AlzheimerVPN is a fork of AmneziaVPN with work concentrated around connection reliability, diagnostics, modern Apple platform support, and split tunneling that keeps up with real DNS behavior.
 
-The repository is renamed for the fork, but the application itself still builds and presents as **AmneziaVPN**. That is intentional: the user-facing app name, titlebar, logs, and upstream identity stay familiar, while this fork documents and isolates the split-tunneling work.
+## What Changed
 
-## What changed
+### 🩺 Connection Diagnostics
 
-This fork focuses on one practical problem: split tunneling should behave predictably when sites resolve to changing IP addresses, when wildcard hostnames are used, and when kill switch rules interact with bypass routes.
+- The app now has explicit connection health states instead of only broad lifecycle states.
+  - Lifecycle still says whether the app is connecting, connected, disconnecting, or disconnected.
+  - Diagnostics say what is actually happening: waiting for handshake, applying routes, checking DNS, checking traffic, recovering, or failing for a specific reason.
+- API failures are logged as structured diagnostic events.
+  - HTTP status, Qt network error, response body, and endpoint are preserved in logs.
+  - This makes failures like “configuration API returned 500” visible instead of hiding them behind a generic connection error.
+- The connection watchdog now fails faster.
+  - The connect timeout is 30 seconds instead of 45 seconds.
+  - A stuck connection attempt becomes a real diagnostic state instead of spinning forever.
 
-The main changes are:
+### 🧯 State Correctness
 
-- Wildcard hostname rules with `*`, for example `*.example.com`, `api.*.example.com`, or `a*b.example.com`.
-- URL input normalization: schemes and paths are stripped, so `https://mail.example.com/inbox` becomes `mail.example.com`.
-- Removed special `regex:` and `suffix:` rule modes from the new split-rule parser. The fork keeps the rule language small: exact hostnames, wildcard hostnames, and IP/CIDR rules.
-- Re-resolve exact domain rules on connect and reconnect.
-- Add routes for all resolved IPv4 addresses, not only the first DNS result.
-- Retry route add once after a partial route failure by resolving the hostname again.
-- Keep macOS kill switch allow-list entries synchronized with the same IPs used for split-tunnel bypass routes.
-- Add a macOS DNS observer path for wildcard rules. When normal system DNS sees a matching hostname, the daemon can add the resolved IPv4 routes and matching kill-switch allow-list entries.
-- Add connection diagnostics for slow or broken connection states, including API failures, local service problems, handshake timeout, DNS failure, route mismatch, no-traffic state, and recovery attempts.
-- Prevent stale transient diagnostics from leaking into the UI after terminal states. For example, cleanup code can no longer show `Checking DNS` after a disconnect or after a real error.
-- Reduce the connect watchdog from 45 seconds to 30 seconds.
+- Transient cleanup states can no longer leak into the UI after the connection is already done.
+  - `Checking DNS` cannot appear after `Disconnected`.
+  - `Checking DNS` cannot overwrite a real error after `Error`.
+- `VpnConnection` is the source of truth for diagnostic validity.
+  - QML and `ConnectionController` only display filtered state.
+  - Business logic decides which diagnostics are still valid for the current connection state.
+- Recovery and no-traffic handling are now explicit.
+  - The app can distinguish “connected but no traffic is passing” from a healthy tunnel.
+  - Recovery attempts are visible in diagnostics and logs.
 
-## What this does not claim
+### 🧭 Split Tunneling
 
-AlzheimerVPN does not make every possible DNS or browser path observable.
+- Split-tunnel rules are simpler and more predictable.
+  - Exact hostnames are supported.
+  - Wildcard hostnames with `*` are supported.
+  - IP and CIDR rules are supported.
+  - Old special `regex:` and `suffix:` modes are removed from the new rule parser.
+- URL-like input is normalized before routing.
+  - `https://mail.example.com/inbox` becomes `mail.example.com`.
+  - Paths, schemes, query strings, and fragments do not become routing rules.
+- Exact domains are re-resolved on connect and reconnect.
+  - Rotating DNS answers are not pinned forever to the first old IP.
+  - All resolved IPv4 addresses are routed, not only the first one.
+- Partial route failures get one automatic retry after a fresh DNS resolve.
+  - This covers cases where DNS rotated or one route add failed while others succeeded.
+- macOS kill switch state is synchronized with bypass routes.
+  - The same IPs used for split-tunnel bypass are also added to the kill-switch allow-list.
+  - This prevents “route says en0, firewall still blocks it” mismatches.
+- macOS wildcard routing can react to system DNS responses.
+  - The daemon observes matching DNS answers and adds routes for resolved IPv4 addresses.
+  - This is the path that makes wildcard rules useful for hosts with generated subdomains.
 
-Wildcard routing depends on seeing DNS queries. Normal system DNS is covered by the macOS observer path. Browser DoH/DoT, private DNS inside an app, a pinned IP, or an already cached connection can bypass that observer. Exact hostname rules are still re-resolved on connect/reconnect, but mid-session IP rotation is only handled when the system exposes the lookup.
+### 🍎 Apple Platform Work
 
-In other words: this fork makes the common split-tunneling path much more deterministic, but it does not pretend that encrypted app-private DNS can be observed from the system DNS path.
+- macOS build settings were updated for modern Apple targets.
+- App naming is configurable through CMake instead of being hardcoded across the codebase.
+- The app still presents as `AmneziaVPN` at runtime.
+- Native macOS/iOS glue was cleaned up where it affected build compatibility and app lifecycle behavior.
+- The fork keeps the original app identity separate during local live testing so the installed original app does not get overwritten accidentally.
 
-## Useful examples
+### ✅ Tests
 
-For Apple Mail with Gmail IMAP, an exact rule like this should be handled by connect/reconnect resolution:
-
-```text
-imap.gmail.com
-```
-
-Gmail may return multiple IPv4 addresses. This fork routes all returned IPv4 addresses instead of silently choosing only one.
-
-For wildcard hosts, use:
-
-```text
-*.example.com
-api.*.example.com
-```
-
-`*.example.com` does not automatically include `example.com`; add both if both are needed.
+- Added focused tests for split-tunnel rule parsing.
+- Added route-planning tests for DNS rotation, multiple A records, stale IPs, retry behavior, and kill-switch synchronization.
+- Added DNS parser tests for A records, CNAME chains, ignored AAAA records, malformed packets, and wildcard matching.
+- Added connection-health tests for watchdog timeout, no-traffic detection, recovery states, and stale diagnostic prevention.
+- Added Apple native-stack checks for the macOS/iOS modernization layer.
 
 ## Diagnostics
 
-The UI now separates lifecycle state from diagnostic state.
+The UI separates what the connection **is** from what the connection **is doing**.
 
-Lifecycle answers the button-level question:
+Lifecycle text:
 
 ```text
 Connect
@@ -62,7 +79,7 @@ Connected
 Disconnecting
 ```
 
-Diagnostics answer what the connection is doing or why it failed:
+Diagnostic text:
 
 ```text
 Starting VPN protocol
@@ -77,15 +94,15 @@ VPN is connected, but traffic is not passing
 Recovering connection...
 ```
 
-The important architectural rule is that QML does not decide whether a diagnostic is truthful. `ConnectionController` and QML only display the filtered state from `VpnConnection`. Transient cleanup diagnostics are blocked at the source after `Disconnected` and `Error`.
+The key rule: diagnostics are filtered before they reach QML. UI code does not guess whether a message is stale. `VpnConnection` decides that from the current connection state, last error, and diagnostic type.
 
-API failures are also written as structured diagnostic log lines, for example:
+Structured log example:
 
 ```text
-AmneziaDiagnostic event=api_failure http_status=500 reply_error=401 ...
+AmneziaDiagnostic event=api_failure http_status=500 reply_error=401 response=internal server error
 ```
 
-## Building from source
+## Building From Source
 
 Clone with submodules:
 
@@ -94,13 +111,13 @@ git clone --recursive <your-fork-url> AlzheimerVPN
 cd AlzheimerVPN
 ```
 
-If the repository was already cloned without submodules:
+If the repository was already cloned:
 
 ```bash
 git submodule update --init --recursive
 ```
 
-Install the build requirements:
+Install:
 
 - CMake
 - Xcode or Xcode Command Line Tools on macOS
@@ -108,7 +125,7 @@ Install the build requirements:
 - Conan 2
 - Ninja or another CMake-supported generator
 
-On macOS with Homebrew-style tools, the local build used during development was:
+Local macOS build:
 
 ```bash
 export CONAN_HOME="$HOME/.conan2"
@@ -117,25 +134,25 @@ cmake -S . -B /private/tmp/alzheimervpn-build \
 cmake --build /private/tmp/alzheimervpn-build --target AmneziaVPN -- -j4
 ```
 
-For focused diagnostic tests:
+Focused diagnostics test:
 
 ```bash
 cmake --build /private/tmp/alzheimervpn-build --target test_connection_health -- -j4
 /private/tmp/alzheimervpn-build/client/tests/test_connection_health
 ```
 
-The project also keeps the upstream deploy scripts:
+Upstream build scripts are still available:
 
 ```bash
 deploy/build.sh
 deploy/build.sh --installer all
 ```
 
-## Live testing notes
+## Live Testing
 
-The original app and a forked test bundle can use different macOS preference domains. If a fork bundle is used for live Premium testing, copy the activated profile data intentionally and back up the fork preferences first.
+The original app and a fork test bundle can use different macOS preference domains. For Premium live testing, the fork must use the same activated profile data as the original app.
 
-At minimum compare the original and fork values for:
+Check or copy these keys intentionally:
 
 - `Conf.installationUuid`
 - `Servers.serversList`
@@ -147,9 +164,7 @@ At minimum compare the original and fork values for:
 - `Conf.killSwitchEnabled`
 - `Conf.useAmneziaDns`
 
-If only the split-tunneling lists are copied, the UI can show the right rules while Premium API config retrieval still fails because the fork is using a different activated profile.
-
-To verify the installed fork binary is not stale:
+Before trusting a live installed build, verify that the built, staged, and installed binaries match:
 
 ```bash
 shasum -a 256 \
@@ -157,21 +172,14 @@ shasum -a 256 \
   /Applications/AmneziaVPNFork.app/Contents/MacOS/AmneziaVPN
 ```
 
-The hashes must match before trusting a live UI test.
+## Upstream Intent
 
-## Upstream intent
+This work can be proposed upstream as one PR, but the changes are easier to review as separate areas:
 
-The upstreamable part of this fork is not the joke name. The useful upstream work is:
+The first area is diagnostics. It adds connection-health states, structured failure logs, watchdog behavior, and rules that prevent stale UI messages.
 
-- simpler split-tunnel rule parsing;
-- route planning for changing DNS answers;
-- kill-switch and bypass-route consistency;
-- macOS DNS observation for wildcard hostnames;
-- clearer connection diagnostics;
-- tests around split rules, route planning, DNS parsing, and connection health.
+The second area is split tunneling. It simplifies rule parsing, re-resolves hostnames, routes all IPv4 answers, retries partial route failures, and keeps kill-switch allow-lists aligned with bypass routes.
 
-Those pieces can be proposed to AmneziaVPN as one PR or split into smaller PRs if maintainers prefer a staged review.
+The third area is macOS support. It adds DNS observation for wildcard split rules and updates native Apple-platform glue where older assumptions affected modern builds or runtime behavior.
 
-## License
-
-This fork follows the upstream AmneziaVPN licensing model. See `LICENSE` and third-party license files in the repository.
+The fourth area is test coverage. The new tests lock down rule parsing, DNS packet parsing, route planning, connection diagnostics, and Apple platform behavior.
