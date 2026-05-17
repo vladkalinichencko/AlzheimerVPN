@@ -56,15 +56,7 @@ AlzheimerVPN is a fork of AmneziaVPN with work concentrated around connection re
 - App naming is configurable through CMake.
 - The app presents as `AmneziaVPN` at runtime.
 - Native macOS/iOS glue was cleaned up where it affected build compatibility and app lifecycle behavior.
-- The fork keeps the original app identity separate during local live testing so the installed original app does not get overwritten accidentally.
-
-### ✅ Tests
-
-- Added focused tests for split-tunnel rule parsing.
-- Added route-planning tests for DNS rotation, multiple A records, stale IPs, retry behavior, and kill-switch synchronization.
-- Added DNS parser tests for A records, CNAME chains, ignored AAAA records, malformed packets, and wildcard matching.
-- Added connection-health tests for watchdog timeout, no-traffic detection, recovery states, and stale diagnostic prevention.
-- Added Apple native-stack checks for the macOS/iOS modernization layer.
+- The fork keeps the original app identity separate during local live validation so the installed original app does not get overwritten accidentally.
 
 ## Diagnostics
 
@@ -134,13 +126,6 @@ cmake -S . -B /private/tmp/alzheimervpn-build \
 cmake --build /private/tmp/alzheimervpn-build --target AmneziaVPN -- -j4
 ```
 
-Focused diagnostics test:
-
-```bash
-cmake --build /private/tmp/alzheimervpn-build --target test_connection_health -- -j4
-/private/tmp/alzheimervpn-build/client/tests/test_connection_health
-```
-
 Upstream build scripts are available:
 
 ```bash
@@ -148,9 +133,9 @@ deploy/build.sh
 deploy/build.sh --installer all
 ```
 
-## Live Testing
+## Live Validation
 
-The original app and a fork test bundle can use different macOS preference domains. For Premium live testing, the fork must use the same activated profile data as the original app.
+The original app and a fork bundle can use different macOS preference domains. For Premium live validation, the fork must use the same activated profile data as the original app.
 
 Check or copy these keys intentionally:
 
@@ -181,5 +166,3 @@ The first area is diagnostics. It adds connection-health states, structured fail
 The second area is split tunneling. It simplifies rule parsing, re-resolves hostnames, routes all IPv4 answers, retries partial route failures, and keeps kill-switch allow-lists aligned with bypass routes.
 
 The third area is macOS support. It adds DNS observation for wildcard split rules and updates native Apple-platform glue that affects modern builds and runtime behavior.
-
-The fourth area is test coverage. The new tests lock down rule parsing, DNS packet parsing, route planning, connection diagnostics, and Apple platform behavior.
