@@ -1,0 +1,17 @@
+diff --git a/ipc/uapi_unix.go b/ipc/uapi_unix.go
+index 1a03e58..d7d0d0a 100644
+--- a/ipc/uapi_unix.go
++++ b/ipc/uapi_unix.go
+@@ -28,6 +28,12 @@ const (
+ // flag in wireguard-android.
+ var socketDirectory = "/var/run/amneziawg"
+ 
++func init() {
++	if dir := os.Getenv("WG_UAPI_DIR"); dir != "" {
++		socketDirectory = dir
++	}
++}
++
+ func sockPath(iface string) string {
+ 	return fmt.Sprintf("%s/%s.sock", socketDirectory, iface)
+ }

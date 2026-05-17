@@ -140,6 +140,54 @@ target_link_libraries(test_self_hosted_server_setup PRIVATE
     test_common
 )
 
+add_executable(test_split_tunnel_rule
+    testSplitTunnelRule.cpp
+)
+
+target_link_libraries(test_split_tunnel_rule PRIVATE
+    Qt6::Test
+    test_common
+)
+
+add_executable(test_dns_message_parser
+    testDnsMessageParser.cpp
+)
+
+target_link_libraries(test_dns_message_parser PRIVATE
+    Qt6::Test
+    test_common
+)
+
+add_executable(test_split_tunnel_route_planner
+    testSplitTunnelRoutePlanner.cpp
+)
+
+target_link_libraries(test_split_tunnel_route_planner PRIVATE
+    Qt6::Test
+    test_common
+)
+
+add_executable(test_connection_health
+    testConnectionHealth.cpp
+)
+
+target_link_libraries(test_connection_health PRIVATE
+    Qt6::Test
+    test_common
+)
+
+add_executable(test_apple_native_stack
+    testAppleNativeStack.cpp
+)
+
+target_compile_definitions(test_apple_native_stack PRIVATE
+    AMNEZIA_SOURCE_ROOT="${CMAKE_SOURCE_DIR}"
+)
+
+target_link_libraries(test_apple_native_stack PRIVATE
+    Qt6::Test
+)
+
 enable_testing()
 add_test(NAME ImportExportTest COMMAND test_import_export)
 add_test(NAME MultipleImportsTest COMMAND test_multiple_imports)
@@ -153,3 +201,8 @@ add_test(NAME ComplexOperationsTest COMMAND test_complex_operations)
 add_test(NAME SettingsSignalsTest COMMAND test_settings_signals)
 add_test(NAME UiServersModelAndControllerTest COMMAND test_ui_servers_model_and_controller)
 add_test(NAME SelfHostedServerSetupTest COMMAND test_self_hosted_server_setup)
+add_test(NAME SplitTunnelRuleTest COMMAND test_split_tunnel_rule)
+add_test(NAME DnsMessageParserTest COMMAND test_dns_message_parser)
+add_test(NAME SplitTunnelRoutePlannerTest COMMAND test_split_tunnel_route_planner)
+add_test(NAME ConnectionHealthTest COMMAND test_connection_health)
+add_test(NAME AppleNativeStackTest COMMAND test_apple_native_stack)

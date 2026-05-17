@@ -46,7 +46,7 @@
 					<key>UISceneConfigurationName</key>
 					<string>Default Configuration</string>
 					<key>UISceneDelegateClassName</key>
-					<string>QIOSWindowSceneDelegate</string>
+					<string>AmneziaSceneDelegate</string>
 				</dict>
 			</array>
 		</dict>
@@ -67,8 +67,6 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-	<key>UIUserInterfaceStyle</key>
-	<string>Light</string>
 	<key>com.wireguard.ios.app_group_id</key>
 	<string>group.org.amnezia.AmneziaVPN</string>
 	<key>UIViewControllerBasedStatusBarAppearance</key>

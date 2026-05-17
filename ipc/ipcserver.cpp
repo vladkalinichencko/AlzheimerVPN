@@ -190,6 +190,15 @@ bool IpcServer::restoreResolvers()
     return Router::restoreResolvers();
 }
 
+bool IpcServer::configureDnsSplitTunnel(const QStringList &rules, const QString &gw, bool killSwitchEnabled)
+{
+#ifdef MZ_DEBUG
+    qDebug() << "IpcServer::configureDnsSplitTunnel";
+#endif
+
+    return Router::configureDnsSplitTunnel(rules, gw, killSwitchEnabled);
+}
+
 bool IpcServer::StartRoutingIpv6()
 {
 #ifdef MZ_DEBUG

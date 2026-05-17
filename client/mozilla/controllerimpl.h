@@ -9,6 +9,8 @@
 #include <functional>
 #include <QDateTime>
 
+#include "core/utils/errorCodes.h"
+
 class Keys;
 class Device;
 class Server;
@@ -84,6 +86,7 @@ class ControllerImpl : public QObject {
   void statusUpdated(const QString& serverIpv4Gateway,
                      const QString& deviceIpv4Address, uint64_t txBytes,
                      uint64_t rxBytes);
+  void backendFailure(amnezia::ErrorCode error);
 };
 
 #endif  // CONTROLLERIMPL_H

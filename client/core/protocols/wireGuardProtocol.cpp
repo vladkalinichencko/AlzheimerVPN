@@ -35,10 +35,17 @@ WireguardProtocol::WireguardProtocol(const QJsonObject &configuration, QObject *
                     (!m_vpnLocalAddress.isEmpty() && m_vpnLocalAddress != previousLocal)) {
                     emit tunnelAddressesUpdated(m_vpnGateway, m_vpnLocalAddress);
                 }
+
+                setBytesChanged(rxBytes, txBytes);
             });
 
     connect(m_impl.get(), &ControllerImpl::disconnected, this,
             [this]() { setConnectionState(Vpn::ConnectionState::Disconnected); });
+    connect(m_impl.get(), &ControllerImpl::backendFailure, this,
+            [this](ErrorCode error) {
+                setLastError(error);
+                emit protocolError(error);
+            });
     m_impl->initialize(nullptr, nullptr);
 }
 
@@ -52,6 +59,12 @@ void WireguardProtocol::stop()
 {
     stopMzImpl();
     return;
+}
+
+bool WireguardProtocol::requestStatus()
+{
+    m_impl->checkStatus();
+    return true;
 }
 
 ErrorCode WireguardProtocol::startMzImpl()

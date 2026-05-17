@@ -6,10 +6,8 @@
 #include "leakdetector.h"
 #include "logger.h"
 
-#include <QProcess>
 #include <QMetaObject>
 #include <pthread.h>
-#include <iostream>
 
 #import <CoreWLAN/CoreWLAN.h>
 #import <Network/Network.h>
@@ -267,70 +265,22 @@ void MacOSNetworkWatcher::checkInterface() {
     return;
   }
 
-  // Use wdutil to get reliable WiFi information
-  QProcess process;
-  process.start("wdutil", QStringList() << "info");
-  process.waitForFinished(5000);
-  
-  QString output = process.readAllStandardOutput();
-  QString errorOutput = process.readAllStandardError();
-  
-  logger.debug() << "wdutil exit code:" << process.exitCode();
-  
-  if (process.exitCode() != 0) {
-    logger.debug() << "wdutil failed with exit code:" << process.exitCode();
+  CWWiFiClient* client = CWWiFiClient.sharedWiFiClient;
+  if (!client) {
+    logger.debug() << "Unable to retrieve the CWWiFiClient shared instance";
     return;
   }
-  
-  // Parse wdutil output to find WiFi connection info
-  QStringList lines = output.split('\n');
-  QString ssid, interfaceName, security;
-  bool wifiSectionFound = false;
-  
-  for (int i = 0; i < lines.size(); i++) {
-    QString trimmedLine = lines[i].trimmed();
-    
-    if (trimmedLine == "WIFI") {
-      wifiSectionFound = true;
+
+  for (CWInterface* interface in client.interfaces) {
+    if (!interface.ssid) {
       continue;
     }
-    
-    if (wifiSectionFound) {
-      // Stop parsing when we reach next section header (all caps after separator line)
-      if (trimmedLine.startsWith("————————")) {
-        if (i + 1 < lines.size()) {
-          QString nextLine = lines[i + 1].trimmed();
-          if (!nextLine.isEmpty() && nextLine.length() > 2 && nextLine.toUpper() == nextLine && nextLine != "WIFI") {
-            break;
-          }
-        }
-        continue; // Skip separator lines
-      }
-      
-      if (trimmedLine.startsWith("Interface Name")) {
-        QStringList parts = trimmedLine.split(":");
-        if (parts.size() >= 2) {
-          interfaceName = parts[1].trimmed();
-        }
-      } else if (trimmedLine.startsWith("SSID")) {
-        QStringList parts = trimmedLine.split(":");
-        if (parts.size() >= 2) {
-          ssid = parts[1].trimmed();
-        }
-      } else if (trimmedLine.startsWith("Security")) {
-        QStringList parts = trimmedLine.split(":");
-        if (parts.size() >= 2) {
-          security = parts[1].trimmed();
-        }
-      }
-    }
-  }
-  
-  if (!ssid.isEmpty() && !interfaceName.isEmpty()) {
-    logger.debug() << "Found active WiFi connection on" << interfaceName 
-                   << "SSID:" << ssid << "Security:" << security;
-  } else {
-    logger.debug() << "No active WiFi connection found";
-  }
-}
 
+    logger.debug() << "Found active WiFi connection on"
+                   << QString::fromNSString(interface.interfaceName)
+                   << "SSID:" << QString::fromNSString(interface.ssid);
+    return;
+  }
+
+  logger.debug() << "No active WiFi connection found";
+}

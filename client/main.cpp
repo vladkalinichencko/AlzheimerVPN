@@ -6,6 +6,10 @@
 #include "core/utils/migrations.h"
 #include "version.h"
 
+#ifndef AMNEZIA_INSTANCE_SERVER_NAME
+#define AMNEZIA_INSTANCE_SERVER_NAME "AmneziaVPNInstance"
+#endif
+
 #include <QTimer>
 
 #ifdef Q_OS_WIN
@@ -20,7 +24,7 @@
 bool isAnotherInstanceRunning()
 {
     QLocalSocket socket;
-    socket.connectToServer("AmneziaVPNInstance");
+    socket.connectToServer(AMNEZIA_INSTANCE_SERVER_NAME);
     if (socket.waitForConnected(500)) {
         qWarning() << "AmneziaVPN is already running";
         return true;

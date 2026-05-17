@@ -17,8 +17,17 @@
 #  include <sys/types.h>
 #  include <unistd.h>
 
-constexpr const char* TMP_PATH = "/tmp/amneziavpn.socket";
-constexpr const char* VAR_PATH = "/var/run/amneziavpn/daemon.socket";
+#ifndef AMNEZIA_DAEMON_RUN_DIR
+#define AMNEZIA_DAEMON_RUN_DIR "/var/run/amneziavpn"
+#endif
+
+#ifndef AMNEZIA_DAEMON_TMP_SOCKET
+#define AMNEZIA_DAEMON_TMP_SOCKET "/tmp/amneziavpn.socket"
+#endif
+
+constexpr const char* TMP_PATH = AMNEZIA_DAEMON_TMP_SOCKET;
+constexpr const char* RUN_DIR = AMNEZIA_DAEMON_RUN_DIR;
+constexpr const char* DAEMON_SOCKET_NAME = "daemon.socket";
 #endif
 
 namespace {
@@ -70,28 +79,23 @@ QString DaemonLocalServer::daemonPath() const {
   return "\\\\.\\pipe\\amneziavpn";
 #endif
 #if defined(MZ_MACOS) || defined(MZ_LINUX)
-  QDir dir("/var/run");
-  if (!dir.exists()) {
-    logger.warning() << "/var/run doesn't exist. Fallback /tmp.";
+  QDir dir(RUN_DIR);
+  if (dir.exists()) {
+    logger.debug() << RUN_DIR << "seems to be usable";
+    return dir.filePath(DAEMON_SOCKET_NAME);
+  }
+
+  if (!dir.mkpath(QStringLiteral("."))) {
+    logger.warning() << "Failed to create" << RUN_DIR << "Fallback /tmp.";
     return TMP_PATH;
   }
 
-  if (dir.exists("amneziavpn")) {
-    logger.debug() << "/var/run/amneziavpn seems to be usable";
-    return VAR_PATH;
-  }
-
-  if (!dir.mkdir("amneziavpn")) {
-    logger.warning() << "Failed to create /var/run/amneziavpn";
-    return TMP_PATH;
-  }
-
-  if (chmod("/var/run/amneziavpn", S_IRWXU | S_IRWXG | S_IRWXO) < 0) {
+  if (chmod(RUN_DIR, S_IRWXU | S_IRWXG | S_IRWXO) < 0) {
     logger.warning()
-        << "Failed to set the right permissions to /var/run/amneziavpn";
+        << "Failed to set the right permissions to" << RUN_DIR;
     return TMP_PATH;
   }
 
-  return VAR_PATH;
+  return dir.filePath(DAEMON_SOCKET_NAME);
 #endif
 }

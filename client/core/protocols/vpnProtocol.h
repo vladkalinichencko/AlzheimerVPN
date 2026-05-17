@@ -60,6 +60,7 @@ public:
     virtual bool isDisconnected() const;
     virtual ErrorCode start() = 0;
     virtual void stop() = 0;
+    virtual bool requestStatus() { return false; }
 
     Vpn::ConnectionState connectionState() const;
     ErrorCode lastError() const;

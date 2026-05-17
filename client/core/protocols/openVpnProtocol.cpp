@@ -307,8 +307,10 @@ void OpenVpnProtocol::onReadyReadDataFromManagementServer()
 
         if (line.contains("FATAL")) {
             if (line.contains("tap-windows6 adapters on this system are currently in use or disabled")) {
+                setLastError(ErrorCode::OpenVpnAdaptersInUseError);
                 emit protocolError(ErrorCode::OpenVpnAdaptersInUseError);
             } else {
+                setLastError(ErrorCode::OpenVpnUnknownError);
                 emit protocolError(ErrorCode::OpenVpnUnknownError);
             }
             return;

@@ -45,6 +45,7 @@ public:
     void onKillSwitchModeChanged(bool enabled);
 
     ErrorCode lastConnectionError() const;
+    ConnectionHealth connectionHealth() const;
 
     bool isConnected() const;
     void setConnectionState(Vpn::ConnectionState state);
@@ -60,9 +61,11 @@ public:
 
 signals:
     void connectionStateChanged(Vpn::ConnectionState state);
+    void connectionHealthChanged(ConnectionHealth health);
     void openConnectionRequested(int serverIndex, DockerContainer container, const QJsonObject &vpnConfiguration);
     void closeConnectionRequested();
     void setConnectionStateRequested(Vpn::ConnectionState state);
+    void setConnectionDiagnosticRequested(ConnectionHealth health);
     void killSwitchModeChangedRequested(bool enabled);
 
 #ifdef Q_OS_ANDROID
@@ -73,6 +76,8 @@ private:
     SecureServersRepository* m_serversRepository;
     SecureAppSettingsRepository* m_appSettingsRepository;
     VpnConnection* m_vpnConnection;
+
+    ConnectionHealth diagnosticForConnectionError(ErrorCode error) const;
 };
 
 #endif

@@ -20,7 +20,10 @@
 #include "killswitch.h"
 
 constexpr const int WG_TUN_PROC_TIMEOUT = 5000;
-constexpr const char* WG_RUNTIME_DIR = "/var/run/amneziawg";
+#ifndef AMNEZIA_WG_RUNTIME_DIR
+#define AMNEZIA_WG_RUNTIME_DIR "/var/run/amneziawg"
+#endif
+constexpr const char* WG_RUNTIME_DIR = AMNEZIA_WG_RUNTIME_DIR;
 
 namespace {
 Logger logger("WireguardUtilsLinux");
@@ -72,7 +75,9 @@ bool WireguardUtilsLinux::addInterface(const InterfaceConfig& config) {
 
     QProcessEnvironment pe = QProcessEnvironment::systemEnvironment();
     QString wgNameFile = wgRuntimeDir.filePath(QString(WG_INTERFACE) + ".sock");
+    QFile::remove(wgNameFile);
     pe.insert("WG_TUN_NAME_FILE", wgNameFile);
+    pe.insert("WG_UAPI_DIR", WG_RUNTIME_DIR);
 #ifdef MZ_DEBUG
     pe.insert("LOG_LEVEL", "debug");
 #endif
@@ -84,13 +89,21 @@ bool WireguardUtilsLinux::addInterface(const InterfaceConfig& config) {
     if (!m_tunnel.waitForStarted(WG_TUN_PROC_TIMEOUT)) {
         logger.error() << "Unable to start tunnel process due to timeout";
         m_tunnel.kill();
+        QFile::remove(wgNameFile);
         return false;
     }
 
     m_ifname = waitForTunnelName(wgNameFile);
     if (m_ifname.isNull()) {
-        logger.error() << "Unable to read tunnel interface name";
+        QString tunnelStdout = QString::fromUtf8(m_tunnel.readAllStandardOutput()).trimmed();
+        QString tunnelStderr = QString::fromUtf8(m_tunnel.readAllStandardError()).trimmed();
+        logger.error() << "Unable to read tunnel interface name from" << wgNameFile
+                       << "using UAPI dir" << WG_RUNTIME_DIR
+                       << "stdout" << tunnelStdout
+                       << "stderr" << tunnelStderr;
         m_tunnel.kill();
+        m_tunnel.waitForFinished(WG_TUN_PROC_TIMEOUT);
+        QFile::remove(wgNameFile);
         return false;
     }
     logger.debug() << "Created wireguard interface" << m_ifname;

@@ -9,6 +9,7 @@
 #include <QTimer>
 
 #include "core/protocols/vpnProtocol.h"
+#include "core/utils/connectionHealth.h"
 #include "core/utils/errorCodes.h"
 #include "core/utils/routeModes.h"
 #include "core/utils/commonStructs.h"
@@ -25,6 +26,8 @@
 
 using namespace amnezia;
 
+class QTcpSocket;
+
 class VpnConnection : public QObject
 {
     Q_OBJECT
@@ -37,6 +40,7 @@ public:
 
     ErrorCode lastError() const;
     Vpn::ConnectionState connectionState() const;
+    ConnectionHealth connectionHealth() const;
 
     QSharedPointer<VpnProtocol> vpnProtocol() const;
 
@@ -54,6 +58,7 @@ public slots:
     void disconnectFromVpn();
 
     void onKillSwitchModeChanged(bool enabled);
+    void setConnectionDiagnostic(ConnectionHealth health);
     void disconnectSlots();
 
     void setConnectionState(Vpn::ConnectionState state);
@@ -61,6 +66,7 @@ public slots:
 signals:
     void bytesChanged(quint64 receivedBytes, quint64 sentBytes);
     void connectionStateChanged(Vpn::ConnectionState state);
+    void connectionHealthChanged(ConnectionHealth health);
     void vpnProtocolError(amnezia::ErrorCode error);
 
     void serviceIsNotReady();
@@ -68,9 +74,15 @@ signals:
 protected slots:
     void onBytesChanged(quint64 receivedBytes, quint64 sentBytes);
     void onConnectionStateChanged(Vpn::ConnectionState state);
+    void onProtocolError(amnezia::ErrorCode error);
+    void onConnectingTimedOut();
+    void checkConnectedHealth();
+    void onConnectivityProbeSucceeded();
+    void onConnectivityProbeFailed();
 
 protected:
     QSharedPointer<VpnProtocol> m_vpnProtocol;
+    virtual void connectConnectivityProbe(QTcpSocket *socket);
 
 private:
     SecureServersRepository* m_serversRepository;
@@ -82,6 +94,9 @@ private:
 
     // Only for iOS for now, check counters
     QTimer m_checkTimer;
+    QTimer m_connectingTimer;
+    QTimer m_healthTimer;
+    QScopedPointer<QTcpSocket> m_connectivityProbe;
 
 #ifdef Q_OS_ANDROID
    AndroidVpnProtocol* androidVpnProtocol = nullptr;
@@ -90,12 +105,27 @@ private:
    void createAndroidConnections();
 #endif
 
-   Vpn::ConnectionState m_connectionState;
+   Vpn::ConnectionState m_connectionState = Vpn::ConnectionState::Disconnected;
+   ConnectionHealth m_connectionHealth = ConnectionHealth::Idle;
+   ErrorCode m_lastError = ErrorCode::NoError;
+   int m_healthChecksWithoutTraffic = 0;
+   bool m_noTrafficRecoveryAttempted = false;
 
    void createProtocolConnections();
+   void setConnectionHealth(ConnectionHealth health);
+   bool shouldPublishConnectionHealth(ConnectionHealth health) const;
+   void startConnectingWatchdog();
+   void stopConnectingWatchdog();
+   void startConnectedHealthCheck();
+   void stopConnectedHealthCheck();
+   void startConnectivityProbe();
+   void stopConnectivityProbe();
+   void markLastError(ErrorCode error);
 
    void appendSplitTunnelingConfig();
    void appendKillSwitchConfig();
+   void configureDnsSplitTunnel(const QString &gw, amnezia::RouteMode mode);
+   bool addSplitTunnelRoutes(const QString &gw, amnezia::RouteMode mode, const QStringList &ips);
 };
 
 #endif // VPNCONNECTION_H

@@ -26,6 +26,8 @@ DnsUtilsMacos::DnsUtilsMacos(QObject* parent) : DnsUtils(parent) {
   }
 
   logger.debug() << "DnsUtilsMacos created.";
+  connect(&m_splitRouteObserver, &DnsSplitRouteObserver::hostResolved,
+          this, &DnsUtilsMacos::splitTunnelHostResolved);
 }
 
 DnsUtilsMacos::~DnsUtilsMacos() {
@@ -110,6 +112,17 @@ static void cfDictSetStringList(CFMutableDictionaryRef dict, CFStringRef name,
 bool DnsUtilsMacos::updateResolvers(const QString& ifname,
                                     const QList<QHostAddress>& resolvers) {
   Q_UNUSED(ifname);
+  m_currentResolvers = resolvers;
+  QStringList resolverList;
+  for (const QHostAddress& addr : resolvers) {
+    resolverList.append(addr.toString());
+  }
+
+  if (m_splitRouteObserver.start(resolvers)) {
+    resolverList = QStringList{ QStringLiteral("127.0.0.1") };
+  } else {
+    m_splitRouteObserver.stop();
+  }
 
   // Get the list of current network services.
   CFArrayRef netServices = SCDynamicStoreCopyKeyList(
@@ -124,11 +137,7 @@ bool DnsUtilsMacos::updateResolvers(const QString& ifname,
       kCFAllocatorSystemDefault, 0, &kCFCopyStringDictionaryKeyCallBacks,
       &kCFTypeDictionaryValueCallBacks);
   auto configGuard = qScopeGuard([&] { CFRelease(dnsConfig); });
-  QStringList list;
-  for (const QHostAddress& addr : resolvers) {
-    list.append(addr.toString());
-  }
-  cfDictSetStringList(dnsConfig, kSCPropNetDNSServerAddresses, list);
+  cfDictSetStringList(dnsConfig, kSCPropNetDNSServerAddresses, resolverList);
   cfDictSetString(dnsConfig, kSCPropNetDNSDomainName, "lan");
 
   // Backup each network service's DNS config, and replace it with ours.
@@ -154,6 +163,9 @@ bool DnsUtilsMacos::updateResolvers(const QString& ifname,
 }
 
 bool DnsUtilsMacos::restoreResolvers() {
+  m_splitRouteObserver.stop();
+  m_currentResolvers.clear();
+
   for (const QString& uuid : m_prevServices.keys()) {
     CFStringRef path = CFStringCreateWithFormat(
         kCFAllocatorSystemDefault, nullptr,
@@ -220,4 +232,12 @@ void DnsUtilsMacos::backupService(const QString& uuid) {
   }
 
   m_prevServices[uuid] = backup;
+}
+
+void DnsUtilsMacos::configureSplitTunnelRules(const QStringList& rules)
+{
+  m_splitRouteObserver.setRules(rules);
+  if (!m_currentResolvers.isEmpty()) {
+    updateResolvers(QString(), m_currentResolvers);
+  }
 }

@@ -42,6 +42,12 @@ namespace
     constexpr QLatin1String unprocessableSubscriptionMessage("Failed to retrieve subscription information. Is it activated?");
 
     constexpr int proxyStorageRequestTimeoutMsecs = 3000;
+
+    QByteArray agwPublicKey(bool isDevEnvironment)
+    {
+        QByteArray key = isDevEnvironment ? DEV_AGW_PUBLIC_KEY : PROD_AGW_PUBLIC_KEY;
+        return key.replace("\\n", "\n");
+    }
 }
 
 GatewayController::GatewayController(const QString &gatewayEndpoint, const bool isDevEnvironment, const int requestTimeoutMsecs,
@@ -101,7 +107,7 @@ GatewayController::EncryptedRequestData GatewayController::prepareRequest(const 
 
         EVP_PKEY *publicKey = nullptr;
         try {
-            QByteArray rsaKey = m_isDevEnvironment ? DEV_AGW_PUBLIC_KEY : PROD_AGW_PUBLIC_KEY;
+            QByteArray rsaKey = agwPublicKey(m_isDevEnvironment);
             QSimpleCrypto::QRsa rsa;
             publicKey = rsa.getPublicKeyFromByteArray(rsaKey);
         } catch (...) {
@@ -168,7 +174,7 @@ ErrorCode GatewayController::post(const QString &endpoint, const QJsonObject api
     wait.exec(QEventLoop::ExcludeUserInputEvents);
 
     QByteArray encryptedResponseBody = reply->readAll();
-    QString replyErrorString = reply->errorString();
+    QString replyErrorString = QString("%1 url=%2").arg(reply->errorString(), reply->url().toString());
     auto replyError = reply->error();
     int httpStatusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
 
@@ -186,7 +192,7 @@ ErrorCode GatewayController::post(const QString &endpoint, const QJsonObject api
         auto replyProcessingFunction = [&encryptedResponseBody, &replyErrorString, &replyError, &httpStatusCode, &sslErrors, &encRequestData,
                                         &decryptionResult, this](QNetworkReply *reply, const QList<QSslError> &nestedSslErrors) {
             encryptedResponseBody = reply->readAll();
-            replyErrorString = reply->errorString();
+            replyErrorString = QString("%1 url=%2").arg(reply->errorString(), reply->url().toString());
             replyError = reply->error();
             httpStatusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
 
@@ -241,7 +247,7 @@ QFuture<QPair<ErrorCode, QByteArray>> GatewayController::postAsync(const QString
 
     connect(reply, &QNetworkReply::finished, reply, [promise, sslErrors, encRequestData, endpoint, apiPayload, reply, this]() mutable {
         QByteArray encryptedResponseBody = reply->readAll();
-        QString replyErrorString = reply->errorString();
+        QString replyErrorString = QString("%1 url=%2").arg(reply->errorString(), reply->url().toString());
         auto replyError = reply->error();
         int httpStatusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
 
@@ -352,7 +358,7 @@ QStringList GatewayController::getProxyUrls(const QString &serviceType, const QS
     std::shuffle(primaryBaseUrls.begin(), primaryBaseUrls.end(), generator);
     std::shuffle(fallbackBaseUrls.begin(), fallbackBaseUrls.end(), generator);
 
-    QByteArray key = m_isDevEnvironment ? DEV_AGW_PUBLIC_KEY : PROD_AGW_PUBLIC_KEY;
+    QByteArray key = agwPublicKey(m_isDevEnvironment);
 
     auto appendStorageUrls = [&serviceType, &userCountryCode](const QStringList &baseUrls, QStringList &target) {
         if (!serviceType.isEmpty()) {
@@ -589,7 +595,7 @@ void GatewayController::getProxyUrlsAsync(const QStringList proxyStorageUrls, co
 
             QByteArray responseBody;
             try {
-                QByteArray key = m_isDevEnvironment ? DEV_AGW_PUBLIC_KEY : PROD_AGW_PUBLIC_KEY;
+                QByteArray key = agwPublicKey(m_isDevEnvironment);
                 if (!m_isDevEnvironment) {
                     QCryptographicHash hash(QCryptographicHash::Sha512);
                     hash.addData(key);
@@ -687,7 +693,7 @@ void GatewayController::bypassProxyAsync(
 
     connect(reply, &QNetworkReply::finished, this, [sslErrors, onComplete, encRequestData, reply, this]() {
         QByteArray encryptedResponseBody = reply->readAll();
-        QString replyErrorString = reply->errorString();
+        QString replyErrorString = QString("%1 url=%2").arg(reply->errorString(), reply->url().toString());
         auto replyError = reply->error();
         int httpStatusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
 

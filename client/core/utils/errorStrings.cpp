@@ -55,6 +55,9 @@ QString errorString(ErrorCode code) {
     case (ErrorCode::OpenVpnAdaptersInUseError): errorMessage = QObject::tr("Can't connect: another VPN connection is active"); break;
     case (ErrorCode::OpenVpnTapAdapterError): errorMessage = QObject::tr("Can't setup OpenVPN TAP network adapter"); break;
     case (ErrorCode::AddressPoolError): errorMessage = QObject::tr("VPN pool error: no available addresses"); break;
+    case (ErrorCode::VpnHandshakeTimeout): errorMessage = QObject::tr("VPN server is not responding"); break;
+    case (ErrorCode::VpnNoTrafficError): errorMessage = QObject::tr("VPN is connected, but traffic is not passing"); break;
+    case (ErrorCode::VpnBackendFailure): errorMessage = QObject::tr("Local VPN service failed"); break;
 
     case (ErrorCode::ImportInvalidConfigError): errorMessage = QObject::tr("The config does not contain any containers and credentials for connecting to the server"); break;
     case (ErrorCode::ImportBackupFileUseRestoreInstead): errorMessage = QObject::tr("Backup files cannot be imported here. Use 'Restore from backup' instead."); break;

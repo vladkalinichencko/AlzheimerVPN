@@ -5,7 +5,11 @@ set(HEADERS ${HEADERS}
     ${CLIENT_ROOT_DIR}/../ipc/ipc.h
     ${CLIENT_ROOT_DIR}/amneziaApplication.h
     ${CLIENT_ROOT_DIR}/core/utils/errorCodes.h
+    ${CLIENT_ROOT_DIR}/core/utils/connectionHealth.h
     ${CLIENT_ROOT_DIR}/core/utils/routeModes.h
+    ${CLIENT_ROOT_DIR}/core/utils/dnsMessageParser.h
+    ${CLIENT_ROOT_DIR}/core/utils/splitTunnelRoutePlanner.h
+    ${CLIENT_ROOT_DIR}/core/utils/splitTunnelRule.h
     ${CLIENT_ROOT_DIR}/core/utils/commonStructs.h
     ${CLIENT_ROOT_DIR}/core/utils/containerEnum.h
     ${CLIENT_ROOT_DIR}/core/utils/protocolEnum.h
@@ -90,6 +94,7 @@ set(SOURCES ${SOURCES}
     ${CLIENT_ROOT_DIR}/core/utils/migrations.cpp
     ${CLIENT_ROOT_DIR}/amneziaApplication.cpp
     ${CLIENT_ROOT_DIR}/core/utils/errorStrings.cpp
+    ${CLIENT_ROOT_DIR}/core/utils/connectionHealth.cpp
     ${CLIENT_ROOT_DIR}/core/utils/containers/containerUtils.cpp
     ${CLIENT_ROOT_DIR}/core/protocols/protocolUtils.cpp
     ${CLIENT_ROOT_DIR}/core/utils/selfhosted/scriptsRegistry.cpp
@@ -140,6 +145,9 @@ set(SOURCES ${SOURCES}
     ${CLIENT_ROOT_DIR}/core/utils/api/apiUtils.cpp
     ${CLIENT_ROOT_DIR}/core/utils/osSignalHandler.cpp
     ${CLIENT_ROOT_DIR}/core/utils/utilities.cpp
+    ${CLIENT_ROOT_DIR}/core/utils/dnsMessageParser.cpp
+    ${CLIENT_ROOT_DIR}/core/utils/splitTunnelRoutePlanner.cpp
+    ${CLIENT_ROOT_DIR}/core/utils/splitTunnelRule.cpp
     ${CLIENT_ROOT_DIR}/core/utils/managementServer.cpp
 )
 

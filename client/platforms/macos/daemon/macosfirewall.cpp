@@ -32,6 +32,7 @@
 
 #include "macosfirewall.h"
 #include "logger.h"
+#include "version.h"
 #include <QProcess>
 #include <QCoreApplication>
 
@@ -49,15 +50,23 @@ namespace {
 // Read-only rules bundled with the application.
 #define ResourceDir (qApp->applicationDirPath() + "/pf")
 
-// Writable location that does NOT live inside the signed bundle.  Using a
-// constant path under /Library/Application Support keeps the signature intact
-// and is accessible to the root helper.
-#define DaemonDataDir QStringLiteral("/Library/Application Support/AmneziaVPN/pf")
-
 #include <QProcess>
 
-static QString kRootAnchor = QStringLiteral(BRAND_IDENTIFIER);
+static QString kRootAnchor = QStringLiteral(APPLICATION_NAME) == QStringLiteral("AmneziaVPN")
+    ? QStringLiteral(BRAND_IDENTIFIER)
+    : QStringLiteral(APPLICATION_NAME).toLower();
+static QString kPfFileBase = QStringLiteral(BRAND_IDENTIFIER);
 static QByteArray kPfWarning = "pfctl: Use of -f option, could result in flushing of rules\npresent in the main ruleset added by the system at startup.\nSee /etc/pf.conf for further details.\n";
+
+static bool isDefaultApplication()
+{
+    return QStringLiteral(APPLICATION_NAME) == QStringLiteral("AmneziaVPN");
+}
+
+static QString daemonDataDir()
+{
+    return QStringLiteral("/Library/Application Support/%1/pf").arg(QStringLiteral(APPLICATION_NAME));
+}
 
 int waitForExitCode(QProcess& process)
 {
@@ -99,7 +108,7 @@ void MacOSFirewall::installRootAnchors()
         R"(echo 'nat-anchor "%2/*"'; )"     // PIA's translation anchors
         R"(echo 'rdr-anchor "%3/*"'; )"
         R"(echo 'load anchor "%4" from "%5/%6.conf"'; )" // Load the PIA anchors from file
-        ") | pfctl -N -f -").arg(kRootAnchor, kRootAnchor, kRootAnchor, kRootAnchor, ResourceDir, kRootAnchor);
+        ") | pfctl -N -f -").arg(kRootAnchor, kRootAnchor, kRootAnchor, kRootAnchor, ResourceDir, kPfFileBase);
 
     execute(insertNatAnchors);
 
@@ -111,7 +120,7 @@ void MacOSFirewall::installRootAnchors()
         R"(pfctl -sr | grep -v '%1/*'; )"   // Filter rules (everything from pfctl -sr except 'scrub')
         R"(echo 'anchor "%2/*"'; )"         // PIA's filter anchors
         R"(echo 'load anchor "%3" from "%4/%5.conf"'; )" // Load the PIA anchors from file
-        " ) | pfctl -R -f -").arg(kRootAnchor, kRootAnchor, kRootAnchor, ResourceDir, kRootAnchor);
+        " ) | pfctl -R -f -").arg(kRootAnchor, kRootAnchor, kRootAnchor, ResourceDir, kPfFileBase);
     execute(insertFilterAnchor);
 }
 
@@ -130,8 +139,8 @@ void MacOSFirewall::install()
 
     installRootAnchors();
     // Ensure writable directory exists, then store the token there.
-    QDir().mkpath(DaemonDataDir);
-    execute(QStringLiteral("pfctl -E 2>&1 | grep -F 'Token : ' | cut -c9- > '%1/pf.token'").arg(DaemonDataDir));
+    QDir().mkpath(daemonDataDir());
+    execute(QStringLiteral("pfctl -E 2>&1 | grep -F 'Token : ' | cut -c9- > '%1/pf.token'").arg(daemonDataDir()));
 }
 
 
@@ -140,8 +149,10 @@ void MacOSFirewall::uninstall()
     logger.info() << "Uninstalling PF root anchor";
 
     execute(QStringLiteral("pfctl -q -a '%1' -F all").arg(kRootAnchor));
-    execute(QStringLiteral("test -f '%1/pf.token' && pfctl -X `cat '%1/pf.token'` && rm '%1/pf.token'").arg(DaemonDataDir));
-    execute(QStringLiteral("test -f /etc/pf.conf && pfctl -F all -f /etc/pf.conf"));
+    execute(QStringLiteral("test -f '%1/pf.token' && pfctl -X `cat '%1/pf.token'` && rm '%1/pf.token'").arg(daemonDataDir()));
+    if (isDefaultApplication()) {
+        execute(QStringLiteral("test -f /etc/pf.conf && pfctl -F all -f /etc/pf.conf"));
+    }
 }
 
 bool MacOSFirewall::isInstalled()
@@ -151,7 +162,7 @@ bool MacOSFirewall::isInstalled()
 
 bool MacOSFirewall::isPFEnabled()
 {
-    return 0 == execute(QStringLiteral("test -s '%1/pf.token' && pfctl -s References | grep -qFf '%1/pf.token'").arg(DaemonDataDir), true);
+    return 0 == execute(QStringLiteral("test -s '%1/pf.token' && pfctl -s References | grep -qFf '%1/pf.token'").arg(daemonDataDir()), true);
 }
 
 void MacOSFirewall::ensureRootAnchorPriority()
@@ -171,7 +182,7 @@ bool MacOSFirewall::isRootAnchorLoaded()
 
 void MacOSFirewall::enableAnchor(const QString& anchor)
 {
-    execute(QStringLiteral("if pfctl -q -a '%1/%2' -s rules 2> /dev/null | grep -q . ; then echo '%2: ON' ; else echo '%2: OFF -> ON' ; pfctl -q -a '%1/%2' -F all -f '%3/%1.%2.conf' ; fi").arg(kRootAnchor, anchor, ResourceDir));
+    execute(QStringLiteral("if pfctl -q -a '%1/%2' -s rules 2> /dev/null | grep -q . ; then echo '%2: ON' ; else echo '%2: OFF -> ON' ; pfctl -q -a '%1/%2' -F all -f '%3/%4.%2.conf' ; fi").arg(kRootAnchor, anchor, ResourceDir, kPfFileBase));
 }
 
 void MacOSFirewall::disableAnchor(const QString& anchor)

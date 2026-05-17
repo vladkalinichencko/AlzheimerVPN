@@ -18,6 +18,9 @@ public:
     Q_PROPERTY(bool isConnected READ isConnected NOTIFY connectionStateChanged)
     Q_PROPERTY(bool isConnectionInProgress READ isConnectionInProgress NOTIFY connectionStateChanged)
     Q_PROPERTY(QString connectionStateText READ connectionStateText NOTIFY connectionStateChanged)
+    Q_PROPERTY(QString connectionDiagnosticText READ connectionDiagnosticText NOTIFY connectionStateChanged)
+    Q_PROPERTY(bool hasConnectionDiagnostic READ hasConnectionDiagnostic NOTIFY connectionStateChanged)
+    Q_PROPERTY(bool isConnectionDiagnosticProblem READ isConnectionDiagnosticProblem NOTIFY connectionStateChanged)
 
     explicit ConnectionUiController(ConnectionController* connectionController,
                                     ServersController* serversController,
@@ -28,6 +31,9 @@ public:
     bool isConnected() const;
     bool isConnectionInProgress() const;
     QString connectionStateText() const;
+    QString connectionDiagnosticText() const;
+    bool hasConnectionDiagnostic() const;
+    bool isConnectionDiagnosticProblem() const;
 
 public slots:
     void toggleConnection();
@@ -37,6 +43,7 @@ public slots:
 
     ErrorCode getLastConnectionError();
     void onConnectionStateChanged(Vpn::ConnectionState state);
+    void onConnectionHealthChanged(ConnectionHealth health);
 
     void onCurrentContainerUpdated();
 
@@ -54,6 +61,7 @@ signals:
 
 private:
     Vpn::ConnectionState getCurrentConnectionState();
+    void updateConnectionStateText();
 
     ConnectionController* m_connectionController;
     ServersController* m_serversController;
@@ -61,8 +69,12 @@ private:
     bool m_isConnected = false;
     bool m_isConnectionInProgress = false;
     QString m_connectionStateText = tr("Connect");
+    QString m_connectionDiagnosticText;
+    bool m_hasConnectionDiagnostic = false;
+    bool m_isConnectionDiagnosticProblem = false;
 
     Vpn::ConnectionState m_state;
+    ConnectionHealth m_health = ConnectionHealth::Idle;
 };
 
 #endif

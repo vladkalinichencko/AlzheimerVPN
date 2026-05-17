@@ -2,9 +2,12 @@
 
 #include "core/utils/constants/configKeys.h"
 #include <QDateTime>
+#include <QDebug>
+#include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QTextStream>
 
 using namespace amnezia;
 
@@ -31,6 +34,30 @@ namespace
     {
         const QJsonValue value = jsonObj.value(QStringLiteral("message"));
         return value.isString() ? value.toString().trimmed() : QString();
+    }
+
+    void writeApiFailureLog(const QString &replyErrorString, const QNetworkReply::NetworkError &replyError, const int httpStatusCode,
+                            const QByteArray &responseBody)
+    {
+        QFile file(QStringLiteral("/tmp/AmneziaVPNFork-api.log"));
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+            return;
+        }
+
+        QTextStream stream(&file);
+        stream << QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)
+               << " httpStatus=" << httpStatusCode
+               << " replyError=" << static_cast<int>(replyError)
+               << " replyErrorString=" << replyErrorString
+               << " response=" << QString::fromUtf8(responseBody.left(800)).simplified()
+               << Qt::endl;
+
+        qWarning().noquote()
+            << "AmneziaDiagnostic event=api_failure"
+            << "http_status=" + QString::number(httpStatusCode)
+            << "reply_error=" + QString::number(static_cast<int>(replyError))
+            << "reply_error_text=" + replyErrorString
+            << "response=" + QString::fromUtf8(responseBody.left(800)).simplified();
     }
 
     QString escapeUnicode(const QString &input)
@@ -152,6 +179,7 @@ amnezia::ErrorCode apiUtils::checkNetworkReplyErrors(const QList<QSslError> &ssl
     if (replyError == QNetworkReply::NetworkError::OperationCanceledError
         || replyError == QNetworkReply::NetworkError::TimeoutError) {
         qDebug() << replyError;
+        writeApiFailureLog(replyErrorString, replyError, httpStatusCode, responseBody);
         return amnezia::ErrorCode::ApiConfigTimeoutError;
     }
     if (replyError == QNetworkReply::NetworkError::OperationNotImplementedError) {
@@ -162,6 +190,7 @@ amnezia::ErrorCode apiUtils::checkNetworkReplyErrors(const QList<QSslError> &ssl
     qDebug() << QString::fromUtf8(responseBody);
     qDebug() << replyError;
     qDebug() << httpStatusCode;
+    writeApiFailureLog(replyErrorString, replyError, httpStatusCode, responseBody);
 
     QJsonDocument jsonDoc = QJsonDocument::fromJson(responseBody);
     if (jsonDoc.isObject()) {

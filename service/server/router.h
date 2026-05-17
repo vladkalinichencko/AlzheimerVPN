@@ -3,6 +3,7 @@
 
 #include <QTimer>
 #include <QString>
+#include <QStringList>
 #include <QSettings>
 #include <QHash>
 #include <QDebug>
@@ -27,7 +28,7 @@ public:
     static bool StopRoutingIpv6();
     static bool updateResolvers(const QString& ifname, const QList<QHostAddress>& resolvers);
     static bool restoreResolvers();
+    static bool configureDnsSplitTunnel(const QStringList &rules, const QString &gw, bool killSwitchEnabled);
 };
 
 #endif // ROUTER_H
-

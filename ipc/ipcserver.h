@@ -42,6 +42,7 @@ public:
     virtual bool refreshKillSwitch( bool enabled ) override;
     virtual bool updateResolvers(const QString& ifname, const QList<QHostAddress>& resolvers) override;
     virtual bool restoreResolvers() override;
+    virtual bool configureDnsSplitTunnel(const QStringList &rules, const QString &gw, bool killSwitchEnabled) override;
     virtual bool xrayStart(const QString& cfg) override;
     virtual bool xrayStop() override;
     virtual bool startNetworkCheck(const QString& serverIpv4Gateway, const QString& deviceIpv4Address) override;

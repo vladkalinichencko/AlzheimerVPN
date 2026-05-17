@@ -1,5 +1,6 @@
 #include "ipSplitTunnelingController.h"
 #include "core/utils/networkUtilities.h"
+#include "core/utils/splitTunnelRule.h"
 #include <QJsonObject>
 
 IpSplitTunnelingController::IpSplitTunnelingController(SecureAppSettingsRepository* appSettingsRepository, QObject* parent)
@@ -65,13 +66,14 @@ void IpSplitTunnelingController::addSites(const QMap<QString, QString> &sites, b
 
 bool IpSplitTunnelingController::addSite(const QString &hostname)
 {
-    QString normalizedHostname = normalizeHostname(hostname);
+    const SplitTunnelRule rule = SplitTunnelRule::fromText(hostname);
+    QString normalizedHostname = rule.normalizedText();
     
     if (!validateHostname(normalizedHostname)) {
         return false;
     }
     
-    if (NetworkUtilities::ipAddressWithSubnetRegExp().exactMatch(normalizedHostname)) {
+    if (rule.type() == SplitTunnelRule::Type::IpSubnet || rule.isDynamicHostRule()) {
         processSite(normalizedHostname, "");
         return true;
     }
@@ -150,13 +152,7 @@ QString IpSplitTunnelingController::normalizeHostname(const QString &hostname) c
 
 bool IpSplitTunnelingController::validateHostname(const QString &hostname) const
 {
-    if (hostname.isEmpty()) {
-        return false;
-    }
-    if (!hostname.contains(".") && !NetworkUtilities::ipAddressWithSubnetRegExp().exactMatch(hostname)) {
-        return false;
-    }
-    return true;
+    return SplitTunnelRule::fromText(hostname).isValid();
 }
 
 
@@ -212,7 +208,8 @@ bool IpSplitTunnelingController::importSitesFromJson(const QByteArray& jsonData,
         QString hostname = jsonObject.value("hostname").toString("");
         QString ip = jsonObject.value("ip").toString("");
         
-        QString normalizedHostname = normalizeHostname(hostname);
+        const SplitTunnelRule rule = SplitTunnelRule::fromText(hostname);
+        QString normalizedHostname = rule.normalizedText();
         
         if (!validateHostname(normalizedHostname)) {
             qDebug() << normalizedHostname << " not look like ip adress or domain name";
@@ -242,4 +239,3 @@ QByteArray IpSplitTunnelingController::exportSitesToJson() const
     QJsonDocument jsonDocument(jsonArray);
     return jsonDocument.toJson();
 }
-

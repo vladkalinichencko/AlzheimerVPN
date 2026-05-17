@@ -49,6 +49,8 @@ class HevSocks5Tunnel(ConanFile):
 
     def generate(self):
         tc = AutotoolsToolchain(self)
+        if is_apple_os(self):
+            tc.extra_cflags.append("-Wno-error=uninitialized-const-pointer")
         tc.generate()
 
     def build(self):

@@ -127,6 +127,26 @@ PageType {
                 Layout.alignment: Qt.AlignCenter
             }
 
+            LabelTextType {
+                id: connectionDiagnosticLabel
+                objectName: "connectionDiagnosticLabel"
+
+                Layout.alignment: Qt.AlignHCenter
+                Layout.maximumWidth: Math.min(root.width - 48, 360)
+                Layout.topMargin: 10
+                Layout.bottomMargin: 10
+
+                visible: ConnectionController.hasConnectionDiagnostic
+                text: ConnectionController.connectionDiagnosticText
+                color: ConnectionController.isConnectionDiagnosticProblem ? AmneziaStyle.color.vibrantRed : AmneziaStyle.color.mutedGray
+
+                font.pixelSize: 14
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                maximumLineCount: 2
+                elide: Text.ElideRight
+            }
+
             BasicButtonType {
                 id: splitTunnelingButton
                 objectName: "splitTunnelingButton"

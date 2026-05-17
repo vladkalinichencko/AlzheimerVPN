@@ -77,6 +77,8 @@ deploy/AmneziaVPN*Installer*
 
 # MACOS files
 .DS_Store
+.codex/
+aqtinstall.log
 client/.DS_Store
 ._.DS_Store
 ._*
@@ -143,4 +145,3 @@ macos-signed-build.sh
 macos-with-sign-build.sh
 DeveloperIdApplicationCertificate.p12
 DeveloperIdInstallerCertificate.p12
-

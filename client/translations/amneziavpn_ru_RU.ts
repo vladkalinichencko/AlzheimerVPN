@@ -5115,6 +5115,171 @@ FileZilla или другие SFTP-клиенты, а также смонтир�
         <source>AmneziaWG Legacy is a outdated version of AmneziaWG protocol. To upgrade, install AmneziaWG and recreate users.</source>
         <translation>AmneziaWG Legacy является устаревшей версией протокола AmneziaWG. Для обновления установите AmneziaWG и пересоздайте пользователей.</translation>
     </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="9"/>
+        <source>Preparing</source>
+        <translation>Подготовка</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="11"/>
+        <source>Connecting</source>
+        <translation>Подключение</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="13"/>
+        <source>Connected</source>
+        <translation>Подключено</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="15"/>
+        <source>Reconnecting</source>
+        <translation>Переподключение</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="17"/>
+        <source>Disconnecting</source>
+        <translation>Отключение</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="19"/>
+        <source>Error</source>
+        <translation>Ошибка</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="22"/>
+        <source>Checking</source>
+        <translation>Проверка</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="33"/>
+        <source>Preparing configuration</source>
+        <translation>Подготовка конфигурации</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="35"/>
+        <source>Checking internet connection</source>
+        <translation>Проверка интернет-соединения</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="37"/>
+        <source>Checking Amnezia API</source>
+        <translation>Проверка Amnezia API</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="39"/>
+        <source>Checking local VPN service</source>
+        <translation>Проверка локальной службы VPN</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="41"/>
+        <source>Starting VPN protocol</source>
+        <translation>Запуск VPN-протокола</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="43"/>
+        <source>Checking VPN tunnel interface</source>
+        <translation>Проверка VPN-интерфейса</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="45"/>
+        <source>Waiting for VPN server response</source>
+        <translation>Ожидание ответа VPN-сервера</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="47"/>
+        <source>Applying network routes</source>
+        <translation>Применение сетевых маршрутов</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="49"/>
+        <source>Checking firewall rules</source>
+        <translation>Проверка правил firewall</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="51"/>
+        <source>Checking DNS</source>
+        <translation>Проверка DNS</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="54"/>
+        <source>Checking traffic</source>
+        <translation>Проверка трафика</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="56"/>
+        <source>Connecting...</source>
+        <translation>Подключение...</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="58"/>
+        <source>VPN is working</source>
+        <translation>VPN работает</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="61"/>
+        <source>Local VPN service failed</source>
+        <translation>Сбой локальной службы VPN</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="63"/>
+        <source>Internet connection is unavailable</source>
+        <translation>Интернет-соединение недоступно</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="65"/>
+        <source>Amnezia API is not responding</source>
+        <translation>Amnezia API не отвечает</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="67"/>
+        <source>VPN protocol failed to start</source>
+        <translation>Не удалось запустить VPN-протокол</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="69"/>
+        <source>VPN tunnel interface is missing</source>
+        <translation>VPN-интерфейс не найден</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="71"/>
+        <source>VPN server is not responding</source>
+        <translation>VPN-сервер не отвечает</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="73"/>
+        <source>Network routes do not match VPN mode</source>
+        <translation>Сетевые маршруты не совпадают с режимом VPN</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="75"/>
+        <source>Firewall is blocking VPN traffic</source>
+        <translation>Firewall блокирует VPN-трафик</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="77"/>
+        <source>DNS is not resolving domains</source>
+        <translation>DNS не резолвит домены</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="79"/>
+        <source>VPN is connected, but traffic is not passing</source>
+        <translation>VPN подключен, но трафик не проходит</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="81"/>
+        <source>Recovering connection...</source>
+        <translation>Восстановление подключения...</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="83"/>
+        <source>Connection failed for an unknown reason</source>
+        <translation>Подключение сломалось по неизвестной причине</translation>
+    </message>
+    <message>
+        <location filename="../core/utils/connectionHealth.cpp" line="86"/>
+        <source>Checking connection...</source>
+        <translation>Проверка подключения...</translation>
+    </message>
 </context>
 <context>
     <name>RenameServerDrawer</name>

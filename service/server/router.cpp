@@ -114,6 +114,18 @@ bool Router::restoreResolvers() {
 #endif
 }
 
+bool Router::configureDnsSplitTunnel(const QStringList &rules, const QString &gw, bool killSwitchEnabled)
+{
+#ifdef Q_OS_MACOS
+    return RouterMac::Instance().configureDnsSplitTunnel(rules, gw, killSwitchEnabled);
+#else
+    Q_UNUSED(rules);
+    Q_UNUSED(gw);
+    Q_UNUSED(killSwitchEnabled);
+    return true;
+#endif
+}
+
 bool Router::StopRoutingIpv6()
 {
 #ifdef Q_OS_WIN
@@ -135,4 +147,3 @@ bool Router::StartRoutingIpv6()
     return RouterLinux::Instance().StartRoutingIpv6();
 #endif
 }
-

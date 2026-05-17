@@ -168,14 +168,18 @@ Button {
     }
 
     contentItem: Text {
-        height: 24
+        width: root.width - 36
+        height: root.height - 56
 
         font.family: "PT Root UI VF"
         font.weight: 700
-        font.pixelSize: 20
+        font.pixelSize: root.text.length > 34 ? 14 : root.text.length > 20 ? 16 : 20
 
         color: ConnectionController.isConnected ? connectedButtonColor : defaultButtonColor
         text: root.text
+        wrapMode: Text.WordWrap
+        maximumLineCount: 3
+        elide: Text.ElideRight
 
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter

@@ -1,7 +1,7 @@
 from conan import ConanFile
 from conan.errors import ConanInvalidConfiguration
 from conan.tools.layout import basic_layout
-from conan.tools.files import get, copy
+from conan.tools.files import get, copy, patch
 from conan.tools.gnu import Autotools, AutotoolsToolchain
 
 import os
@@ -11,6 +11,7 @@ class AwgGo(ConanFile):
     version = "0.2.16"
     package_type = "application"
     settings = "os", "arch"
+    exports_sources = "patches/*"
 
     @property
     def _goos(self):
@@ -44,6 +45,7 @@ class AwgGo(ConanFile):
         get(self, f"https://github.com/amnezia-vpn/amneziawg-go/archive/refs/tags/v{self.version}.zip",
             sha256="34da7d4189f215f3930de441548bc2a0c89d54d347a4fb85cb9c715fce6413aa", strip_root=True
         )
+        patch(self, patch_file=os.path.join(self.export_sources_folder, "patches", "0001-allow-uapi-dir-env.patch"))
 
     def generate(self):
         tc = AutotoolsToolchain(self)

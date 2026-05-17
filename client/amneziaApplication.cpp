@@ -25,6 +25,10 @@
 #include "version.h"
 
 #include "platforms/ios/QRCodeReaderBase.h"
+
+#ifndef AMNEZIA_INSTANCE_SERVER_NAME
+#define AMNEZIA_INSTANCE_SERVER_NAME "AmneziaVPNInstance"
+#endif
          
 
 bool AmneziaApplication::m_forceQuit = false;
@@ -251,7 +255,7 @@ bool AmneziaApplication::parseCommands()
 
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && !defined(MACOS_NE)
 void AmneziaApplication::startLocalServer() {
-    const QString serverName("AmneziaVPNInstance");
+    const QString serverName(AMNEZIA_INSTANCE_SERVER_NAME);
     QLocalServer::removeServer(serverName);
 
     QLocalServer *server = new QLocalServer(this);

@@ -30,9 +30,11 @@ ConnectionController::ConnectionController(SecureServersRepository* serversRepos
       m_vpnConnection(vpnConnection)
 {
     connect(m_vpnConnection, &VpnConnection::connectionStateChanged, this, &ConnectionController::connectionStateChanged);
+    connect(m_vpnConnection, &VpnConnection::connectionHealthChanged, this, &ConnectionController::connectionHealthChanged);
     connect(this, &ConnectionController::openConnectionRequested, m_vpnConnection, &VpnConnection::connectToVpn, Qt::QueuedConnection);
     connect(this, &ConnectionController::closeConnectionRequested, m_vpnConnection, &VpnConnection::disconnectFromVpn, Qt::QueuedConnection);
     connect(this, &ConnectionController::setConnectionStateRequested, m_vpnConnection, &VpnConnection::setConnectionState, Qt::QueuedConnection);
+    connect(this, &ConnectionController::setConnectionDiagnosticRequested, m_vpnConnection, &VpnConnection::setConnectionDiagnostic, Qt::QueuedConnection);
     connect(this, &ConnectionController::killSwitchModeChangedRequested, m_vpnConnection, &VpnConnection::onKillSwitchModeChanged, Qt::QueuedConnection);
 #ifdef Q_OS_ANDROID
     connect(this, &ConnectionController::restoreConnectionRequested, m_vpnConnection, &VpnConnection::restoreConnection, Qt::QueuedConnection);
@@ -82,11 +84,14 @@ ErrorCode ConnectionController::openConnection(int serverIndex)
     QJsonObject vpnConfiguration;
     DockerContainer container;
 
+    emit setConnectionDiagnosticRequested(ConnectionHealth::CheckingLocalService);
     ErrorCode errorCode = prepareConnection(serverIndex, vpnConfiguration, container);
     if (errorCode != ErrorCode::NoError) {
+        emit setConnectionDiagnosticRequested(diagnosticForConnectionError(errorCode));
         return errorCode;
     }
 
+    emit setConnectionDiagnosticRequested(ConnectionHealth::StartingProtocol);
     emit openConnectionRequested(serverIndex, container, vpnConfiguration);
     return ErrorCode::NoError;
 }
@@ -117,6 +122,11 @@ void ConnectionController::onKillSwitchModeChanged(bool enabled)
 ErrorCode ConnectionController::lastConnectionError() const
 {
     return m_vpnConnection->lastError();
+}
+
+ConnectionHealth ConnectionController::connectionHealth() const
+{
+    return m_vpnConnection->connectionHealth();
 }
 
 QJsonObject ConnectionController::createConnectionConfiguration(const QPair<QString, QString> &dns,
@@ -180,4 +190,29 @@ bool ConnectionController::isServiceReady() const
 bool ConnectionController::isContainerSupported(DockerContainer container) const
 {
     return ContainerUtils::isSupportedByCurrentPlatform(container);
+}
+
+ConnectionHealth ConnectionController::diagnosticForConnectionError(ErrorCode error) const
+{
+    switch (error) {
+    case ErrorCode::AmneziaServiceNotRunning:
+    case ErrorCode::AmneziaServiceConnectionFailed:
+    case ErrorCode::VpnBackendFailure:
+        return ConnectionHealth::LocalServiceUnavailable;
+    case ErrorCode::ApiConfigTimeoutError:
+    case ErrorCode::ApiUpdateRequestError:
+        return ConnectionHealth::ApiUnavailable;
+    case ErrorCode::VpnHandshakeTimeout:
+        return ConnectionHealth::HandshakeTimeout;
+    case ErrorCode::VpnNoTrafficError:
+        return ConnectionHealth::NoTraffic;
+    case ErrorCode::NotSupportedOnThisPlatform:
+    case ErrorCode::OpenVpnExecutableMissing:
+    case ErrorCode::ExecutableMissing:
+    case ErrorCode::XrayExecutableMissing:
+    case ErrorCode::Tun2SockExecutableMissing:
+        return ConnectionHealth::ProtocolStartFailed;
+    default:
+        return ConnectionHealth::UnknownFailure;
+    }
 }

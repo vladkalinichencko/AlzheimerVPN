@@ -6,10 +6,13 @@
 #include <QHostInfo>
 #include <QJsonObject>
 #include <QObject>
+#include <QPointer>
 #include <QSharedPointer>
 #include <QString>
 #include <QStringList>
+#include <QTcpSocket>
 #include <QTimer>
+#include <functional>
 
 #include <core/configurators/openVpnConfigurator.h>
 #include <core/configurators/wireguardConfigurator.h>
@@ -30,13 +33,27 @@
 #endif
 
 #include "core/utils/networkUtilities.h"
+#include "core/utils/splitTunnelRoutePlanner.h"
+#include "core/utils/splitTunnelRule.h"
 #include "vpnConnection.h"
 
 using namespace ProtocolUtils;
 
 VpnConnection::VpnConnection(SecureServersRepository* serversRepository, SecureAppSettingsRepository* appSettingsRepository, QObject *parent)
-    : QObject(parent), m_serversRepository(serversRepository), m_appSettingsRepository(appSettingsRepository), m_checkTimer(this)
+    : QObject(parent),
+      m_serversRepository(serversRepository),
+      m_appSettingsRepository(appSettingsRepository),
+      m_checkTimer(this),
+      m_connectingTimer(this),
+      m_healthTimer(this)
 {
+    m_connectingTimer.setSingleShot(true);
+    m_connectingTimer.setInterval(30000);
+    connect(&m_connectingTimer, &QTimer::timeout, this, &VpnConnection::onConnectingTimedOut);
+
+    m_healthTimer.setInterval(3000);
+    connect(&m_healthTimer, &QTimer::timeout, this, &VpnConnection::checkConnectedHealth);
+
 #if defined(Q_OS_IOS) || defined(MACOS_NE)
     m_checkTimer.setInterval(1000);
     connect(IosController::Instance(), &IosController::connectionStateChanged, this, &VpnConnection::setConnectionState);
@@ -50,6 +67,13 @@ VpnConnection::~VpnConnection()
 
 void VpnConnection::onBytesChanged(quint64 receivedBytes, quint64 sentBytes)
 {
+    if (m_connectionState == Vpn::ConnectionState::Connected && receivedBytes > 0) {
+        m_healthChecksWithoutTraffic = 0;
+        m_noTrafficRecoveryAttempted = false;
+        setConnectionHealth(ConnectionHealth::Healthy);
+        stopConnectivityProbe();
+    }
+
     emit bytesChanged(receivedBytes, sentBytes);
 }
 
@@ -66,11 +90,62 @@ void VpnConnection::onKillSwitchModeChanged(bool enabled)
 #endif
 }
 
+void VpnConnection::setConnectionDiagnostic(ConnectionHealth health)
+{
+    setConnectionHealth(health);
+}
+
 void VpnConnection::onConnectionStateChanged(Vpn::ConnectionState state)
 {
+    switch (state) {
+    case Vpn::ConnectionState::Connecting:
+        setConnectionHealth(ConnectionHealth::StartingProtocol);
+        startConnectingWatchdog();
+        stopConnectivityProbe();
+        stopConnectedHealthCheck();
+        break;
+    case Vpn::ConnectionState::Reconnecting:
+        setConnectionHealth(ConnectionHealth::Recovering);
+        startConnectingWatchdog();
+        stopConnectivityProbe();
+        stopConnectedHealthCheck();
+        break;
+    case Vpn::ConnectionState::Connected:
+        stopConnectingWatchdog();
+        setConnectionHealth(ConnectionHealth::ApplyingRoutes);
+        break;
+    case Vpn::ConnectionState::Disconnected:
+        stopConnectingWatchdog();
+        stopConnectivityProbe();
+        stopConnectedHealthCheck();
+        markLastError(ErrorCode::NoError);
+        setConnectionHealth(ConnectionHealth::Idle);
+        break;
+    case Vpn::ConnectionState::Error:
+        stopConnectingWatchdog();
+        stopConnectivityProbe();
+        stopConnectedHealthCheck();
+        if (!connectionHealthProblem(m_connectionHealth)) {
+            setConnectionHealth(ConnectionHealth::UnknownFailure);
+        }
+        break;
+    case Vpn::ConnectionState::Preparing:
+        setConnectionHealth(ConnectionHealth::PreparingConfig);
+        break;
+    case Vpn::ConnectionState::Disconnecting:
+    case Vpn::ConnectionState::Unknown:
+        stopConnectingWatchdog();
+        stopConnectivityProbe();
+        stopConnectedHealthCheck();
+        break;
+    }
+
 #ifdef AMNEZIA_DESKTOP
     if (!m_serversRepository || !m_appSettingsRepository) {
         qCritical() << "VpnConnection::onConnectionStateChanged: repositories not initialized";
+        if (state == Vpn::ConnectionState::Connected) {
+            startConnectedHealthCheck();
+        }
         return;
     }
 
@@ -82,11 +157,14 @@ void VpnConnection::onConnectionStateChanged(Vpn::ConnectionState state)
             case Vpn::ConnectionState::Connected: {
                 iface->resetIpStack();
 
+                setConnectionHealth(ConnectionHealth::CheckingDns);
                 auto flushDns = iface->flushDns();
                 if (flushDns.waitForFinished() && flushDns.returnValue())
                     qDebug() << "VpnConnection::onConnectionStateChanged: Successfully flushed DNS";
-                else
+                else {
+                    setConnectionHealth(ConnectionHealth::DnsFailed);
                     qWarning() << "VpnConnection::onConnectionStateChanged: Failed to flush DNS";
+                }
 
                 if (!ContainerUtils::isAwgContainer(container) && container != DockerContainer::WireGuard) {
                     QString dns1 = m_vpnConfiguration.value(configKey::dns1).toString();
@@ -105,22 +183,42 @@ void VpnConnection::onConnectionStateChanged(Vpn::ConnectionState state)
                         RouteMode routeMode = m_appSettingsRepository->routeMode();
                         if (routeMode == amnezia::RouteMode::VpnOnlyForwardSites) {
                             QTimer::singleShot(1000, m_vpnProtocol.data(),
-                                               [this, routeMode]() { addSitesRoutes(m_vpnProtocol->vpnGateway(), routeMode); });
+                                               [this, routeMode]() {
+                                                   configureDnsSplitTunnel(m_vpnProtocol->vpnGateway(), routeMode);
+                                                   addSitesRoutes(m_vpnProtocol->vpnGateway(), routeMode);
+                                               });
                         } else if (routeMode == amnezia::RouteMode::VpnAllExceptSites) {
-                            iface->routeAddList(m_vpnProtocol->vpnGateway(), QStringList() << "0.0.0.0/1");
-                            iface->routeAddList(m_vpnProtocol->vpnGateway(), QStringList() << "128.0.0.0/1");
+                            setConnectionHealth(ConnectionHealth::ApplyingRoutes);
+                            auto routeFirstHalf = iface->routeAddList(m_vpnProtocol->vpnGateway(), QStringList() << "0.0.0.0/1");
+                            auto routeSecondHalf = iface->routeAddList(m_vpnProtocol->vpnGateway(), QStringList() << "128.0.0.0/1");
+                            if (!routeFirstHalf.waitForFinished() || routeFirstHalf.returnValue() != 1 ||
+                                !routeSecondHalf.waitForFinished() || routeSecondHalf.returnValue() != 1) {
+                                setConnectionHealth(ConnectionHealth::RouteMismatch);
+                            }
 
-                            iface->routeAddList(m_vpnProtocol->routeGateway(), QStringList() << remoteAddress());
+                            auto remoteRoute = iface->routeAddList(m_vpnProtocol->routeGateway(), QStringList() << remoteAddress());
+                            if (!remoteRoute.waitForFinished() || remoteRoute.returnValue() != 1) {
+                                setConnectionHealth(ConnectionHealth::RouteMismatch);
+                            }
 #ifdef Q_OS_MACOS
-                            iface->routeAddList(m_vpnProtocol->routeGateway(), QStringList() << dns1 << dns2);
+                            setConnectionHealth(ConnectionHealth::CheckingDns);
+                            auto dnsRoutes = iface->routeAddList(m_vpnProtocol->routeGateway(), QStringList() << dns1 << dns2);
+                            if (!dnsRoutes.waitForFinished() || dnsRoutes.returnValue() != 2) {
+                                setConnectionHealth(ConnectionHealth::DnsFailed);
+                            }
 #endif
+                            configureDnsSplitTunnel(m_vpnProtocol->routeGateway(), routeMode);
                             addSitesRoutes(m_vpnProtocol->routeGateway(), routeMode);
                         }
+                    } else {
+                        configureDnsSplitTunnel(QString(), amnezia::RouteMode::VpnAllSites);
                     }
                 }
             } break;
             case Vpn::ConnectionState::Disconnected:
             case Vpn::ConnectionState::Error: {
+                configureDnsSplitTunnel(QString(), amnezia::RouteMode::VpnAllSites);
+
                 auto flushDns = iface->flushDns();
                 if (flushDns.waitForFinished() && flushDns.returnValue())
                     qDebug() << "VpnConnection::onConnectionStateChanged: Successfully flushed DNS";
@@ -148,6 +246,10 @@ void VpnConnection::onConnectionStateChanged(Vpn::ConnectionState state)
         m_checkTimer.stop();
     }
 #endif
+
+    if (state == Vpn::ConnectionState::Connected) {
+        startConnectedHealthCheck();
+    }
 }
 
 const QString &VpnConnection::remoteAddress() const
@@ -179,41 +281,128 @@ void VpnConnection::addSitesRoutes(const QString &gw, amnezia::RouteMode mode)
             if (NetworkUtilities::checkIpSubnetFormat(i.value().toString())) {
                 ips.append(i.value().toString());
             }
-            sites.append(i.key());
+            if (!amnezia::SplitTunnelRule::fromText(i.key()).isDynamicHostRule()) {
+                sites.append(i.key());
+            }
         }
     }
     ips.removeDuplicates();
 
-    IpcClient::withInterface([&](QSharedPointer<IpcInterfaceReplica> iface) {
-        iface->routeAddList(gw, ips);
-    });
+    addSplitTunnelRoutes(gw, mode, ips);
 
     // re-resolve domains
     for (const QString &site : sites) {
-        const auto &cbResolv = [this, site, gw, mode, ips](const QHostInfo &hostInfo) {
-            const QList<QHostAddress> &addresses = hostInfo.addresses();
-            QString ipv4Addr;
-            for (const QHostAddress &addr : hostInfo.addresses()) {
-                if (addr.protocol() == QAbstractSocket::NetworkLayerProtocol::IPv4Protocol) {
-                    const QString &ip = addr.toString();
-                    // qDebug() << "VpnConnection::addSitesRoutes updating site" << site << ip;
-                    if (!ips.contains(ip)) {
-                        IpcClient::withInterface([&gw, &ip](QSharedPointer<IpcInterfaceReplica> iface) {
-                            iface->routeAddList(gw, QStringList() << ip);
-                        });
-                        m_appSettingsRepository->addVpnSite(mode, site, ip);
+        setConnectionHealth(ConnectionHealth::CheckingDns);
+        auto addResolvedRoutes = QSharedPointer<std::function<void(const QHostInfo &, bool)>>::create();
+        *addResolvedRoutes = [this, site, gw, mode, ips, addResolvedRoutes](const QHostInfo &hostInfo, bool canRetry) mutable {
+            const QStringList resolvedIps = amnezia::SplitTunnelRoutePlanner::resolvedIpv4Routes(hostInfo, ips);
+            if (resolvedIps.isEmpty()) {
+                bool hasIpv4 = false;
+                for (const QHostAddress &addr : hostInfo.addresses()) {
+                    if (addr.protocol() == QAbstractSocket::NetworkLayerProtocol::IPv4Protocol) {
+                        hasIpv4 = true;
+                        break;
                     }
-                    IpcClient::withInterface([](QSharedPointer<IpcInterfaceReplica> iface) {
-                        auto reply = iface->flushDns();
-                        if (reply.waitForFinished() || !reply.returnValue())
-                            qWarning() << "VpnConnection::addSitesRoutes: Failed to flush DNS";
-                    });
-                    break;
                 }
+                if (!hasIpv4) {
+                    setConnectionHealth(ConnectionHealth::DnsFailed);
+                }
+                return;
             }
+
+            const bool routesAdded = addSplitTunnelRoutes(gw, mode, resolvedIps);
+            if (amnezia::SplitTunnelRoutePlanner::shouldRetryRouteAdd(resolvedIps, routesAdded, canRetry)) {
+                QHostInfo::lookupHost(site, this, [addResolvedRoutes](const QHostInfo &retryHostInfo) mutable {
+                    (*addResolvedRoutes)(retryHostInfo, false);
+                });
+                return;
+            }
+            if (!routesAdded) {
+                setConnectionHealth(ConnectionHealth::RouteMismatch);
+                return;
+            }
+
+            m_appSettingsRepository->addVpnSite(mode, site, resolvedIps.first());
+            IpcClient::withInterface([](QSharedPointer<IpcInterfaceReplica> iface) {
+                auto reply = iface->flushDns();
+                if (!reply.waitForFinished() || !reply.returnValue())
+                    qWarning() << "VpnConnection::addSitesRoutes: Failed to flush DNS";
+            });
         };
-        QHostInfo::lookupHost(site, this, cbResolv);
+        QHostInfo::lookupHost(site, this, [addResolvedRoutes](const QHostInfo &hostInfo) mutable {
+            (*addResolvedRoutes)(hostInfo, true);
+        });
     }
+#endif
+}
+
+void VpnConnection::configureDnsSplitTunnel(const QString &gw, amnezia::RouteMode mode)
+{
+#ifdef AMNEZIA_DESKTOP
+    if (!m_appSettingsRepository) {
+        return;
+    }
+
+    QStringList rules;
+    const QVariantMap &sites = m_appSettingsRepository->vpnSites(mode);
+    for (auto i = sites.constBegin(); i != sites.constEnd(); ++i) {
+        const amnezia::SplitTunnelRule rule = amnezia::SplitTunnelRule::fromText(i.key());
+        if (rule.isValid() && rule.type() == amnezia::SplitTunnelRule::Type::WildcardHost) {
+            rules.append(rule.normalizedText());
+        }
+    }
+    rules.removeDuplicates();
+
+    const bool syncKillSwitch = mode == amnezia::RouteMode::VpnAllExceptSites &&
+                                m_appSettingsRepository->isKillSwitchEnabled();
+    setConnectionHealth(ConnectionHealth::CheckingDns);
+    IpcClient::withInterface([this, rules, gw, syncKillSwitch](QSharedPointer<IpcInterfaceReplica> iface) {
+        auto reply = iface->configureDnsSplitTunnel(rules, gw, syncKillSwitch);
+        if (!reply.waitForFinished() || !reply.returnValue()) {
+            setConnectionHealth(ConnectionHealth::DnsFailed);
+            qWarning() << "VpnConnection::configureDnsSplitTunnel: Failed to configure DNS split tunnel";
+        }
+    });
+#else
+    Q_UNUSED(gw);
+    Q_UNUSED(mode);
+#endif
+}
+
+bool VpnConnection::addSplitTunnelRoutes(const QString &gw, amnezia::RouteMode mode, const QStringList &ips)
+{
+#ifdef AMNEZIA_DESKTOP
+    if (ips.isEmpty()) {
+        return true;
+    }
+
+    bool ok = false;
+    setConnectionHealth(ConnectionHealth::ApplyingRoutes);
+    IpcClient::withInterface([this, gw, mode, ips, &ok](QSharedPointer<IpcInterfaceReplica> iface) {
+        auto routeReply = iface->routeAddList(gw, ips);
+        ok = routeReply.waitForFinished() && routeReply.returnValue() == ips.count();
+        if (!ok) {
+            setConnectionHealth(ConnectionHealth::RouteMismatch);
+        }
+
+        const QStringList allowedIps = amnezia::SplitTunnelRoutePlanner::killSwitchAllowedIps(
+            mode, m_appSettingsRepository && m_appSettingsRepository->isKillSwitchEnabled(), ips);
+        if (!allowedIps.isEmpty()) {
+            setConnectionHealth(ConnectionHealth::CheckingFirewall);
+            auto allowReply = iface->addKillSwitchAllowedRange(allowedIps);
+            if (!allowReply.waitForFinished() || !allowReply.returnValue()) {
+                setConnectionHealth(ConnectionHealth::FirewallBlocked);
+                ok = false;
+                qWarning() << "VpnConnection::addSplitTunnelRoutes: Failed to update killswitch allowed ranges";
+            }
+        }
+    });
+    return ok;
+#else
+    Q_UNUSED(gw);
+    Q_UNUSED(mode);
+    Q_UNUSED(ips);
+    return true;
 #endif
 }
 
@@ -235,8 +424,12 @@ ErrorCode VpnConnection::lastError() const
     return ErrorCode::AndroidError;
 #endif
 
+    if (m_lastError != ErrorCode::NoError) {
+        return m_lastError;
+    }
+
     if (m_vpnProtocol.isNull()) {
-        return ErrorCode::InternalError;
+        return ErrorCode::NoError;
     }
 
     return m_vpnProtocol.data()->lastError();
@@ -245,6 +438,11 @@ ErrorCode VpnConnection::lastError() const
 Vpn::ConnectionState VpnConnection::connectionState() const
 {
     return m_connectionState;
+}
+
+ConnectionHealth VpnConnection::connectionHealth() const
+{
+    return m_connectionHealth;
 }
 
 void VpnConnection::connectToVpn(int serverIndex, DockerContainer container, const QJsonObject &vpnConfiguration)
@@ -260,6 +458,8 @@ void VpnConnection::connectToVpn(int serverIndex, DockerContainer container, con
                         .arg(ContainerUtils::containerToString(container))
              << m_appSettingsRepository->routeMode();
 
+    markLastError(ErrorCode::NoError);
+    m_noTrafficRecoveryAttempted = false;
     m_remoteAddress = NetworkUtilities::getIPAddress(vpnConfiguration.value(configKey::hostName).toString());
     setConnectionState(Vpn::ConnectionState::Connecting);
 
@@ -267,7 +467,7 @@ void VpnConnection::connectToVpn(int serverIndex, DockerContainer container, con
 
 #ifdef AMNEZIA_DESKTOP
     if (m_vpnProtocol) {
-        disconnect(m_vpnProtocol.data(), &VpnProtocol::protocolError, this, &VpnConnection::vpnProtocolError);
+        disconnect(m_vpnProtocol.data(), &VpnProtocol::protocolError, this, &VpnConnection::onProtocolError);
         m_vpnProtocol->stop();
         m_vpnProtocol.reset();
     }
@@ -279,7 +479,9 @@ void VpnConnection::connectToVpn(int serverIndex, DockerContainer container, con
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && !defined(MACOS_NE)
     m_vpnProtocol.reset(VpnProtocol::factory(container, m_vpnConfiguration));
     if (!m_vpnProtocol) {
+        markLastError(ErrorCode::InternalError);
         setConnectionState(Vpn::ConnectionState::Error);
+        emit vpnProtocolError(ErrorCode::InternalError);
         return;
     }
     m_vpnProtocol->prepare();
@@ -298,21 +500,27 @@ void VpnConnection::connectToVpn(int serverIndex, DockerContainer container, con
     createProtocolConnections();
 
     if (ErrorCode err = m_vpnProtocol->start(); err != ErrorCode::NoError) {
+        markLastError(err);
+        setConnectionHealth(ConnectionHealth::ProtocolStartFailed);
         setConnectionState(Vpn::ConnectionState::Error);
         emit vpnProtocolError(err);
+        return;
     }
+
+    setConnectionHealth(ConnectionHealth::WaitingHandshake);
 }
 
 void VpnConnection::createProtocolConnections()
 {
-    connect(m_vpnProtocol.data(), &VpnProtocol::protocolError, this, &VpnConnection::vpnProtocolError);
+    connect(m_vpnProtocol.data(), &VpnProtocol::protocolError, this, &VpnConnection::onProtocolError);
     connect(m_vpnProtocol.data(), &VpnProtocol::connectionStateChanged, this, &VpnConnection::setConnectionState);
     connect(m_vpnProtocol.data(), SIGNAL(bytesChanged(quint64, quint64)), this, SLOT(onBytesChanged(quint64, quint64)));
 
 #ifdef AMNEZIA_DESKTOP
     IpcClient::withInterface([this](QSharedPointer<IpcInterfaceReplica> rep) {
-        connect(rep.data(), &IpcInterfaceReplica::networkChanged, this, &VpnConnection::reconnectToVpn, Qt::QueuedConnection);
-        connect(rep.data(), &IpcInterfaceReplica::wakeup, this, &VpnConnection::reconnectToVpn, Qt::QueuedConnection);
+        const auto uniqueQueued = static_cast<Qt::ConnectionType>(int(Qt::QueuedConnection) | int(Qt::UniqueConnection));
+        connect(rep.data(), &IpcInterfaceReplica::networkChanged, this, &VpnConnection::reconnectToVpn, uniqueQueued);
+        connect(rep.data(), &IpcInterfaceReplica::wakeup, this, &VpnConnection::reconnectToVpn, uniqueQueued);
     });
 #endif
 }
@@ -392,12 +600,15 @@ void VpnConnection::appendSplitTunnelingConfig()
 
         if (allowSiteBasedSplitTunneling) {
             QStringList sites;
+            bool hasDynamicHostRules = false;
             const QVariantMap &m = m_appSettingsRepository->vpnSites(routeMode);
             for (auto i = m.constBegin(); i != m.constEnd(); ++i) {
                 if (NetworkUtilities::checkIpSubnetFormat(i.key())) {
                     sites.append(i.key());
                 } else if (NetworkUtilities::checkIpSubnetFormat(i.value().toString())) {
                     sites.append(i.value().toString());
+                } else if (amnezia::SplitTunnelRule::fromText(i.key()).isDynamicHostRule()) {
+                    hasDynamicHostRules = true;
                 }
             }
             sites.removeDuplicates();
@@ -405,7 +616,7 @@ void VpnConnection::appendSplitTunnelingConfig()
                 sitesJsonArray.append(site);
             }
 
-            if (sitesJsonArray.isEmpty()) {
+            if (sitesJsonArray.isEmpty() && !hasDynamicHostRules) {
                 routeMode = amnezia::RouteMode::VpnAllSites;
             } else if (routeMode == amnezia::RouteMode::VpnOnlyForwardSites) {
                 // Allow traffic to Amnezia DNS
@@ -491,9 +702,14 @@ void VpnConnection::reconnectToVpn() {
 
     m_vpnProtocol->stop();
     if (ErrorCode err = m_vpnProtocol->start(); err != ErrorCode::NoError) {
+        markLastError(err);
+        setConnectionHealth(ConnectionHealth::ProtocolStartFailed);
         setConnectionState(Vpn::ConnectionState::Error);
         emit vpnProtocolError(err);
+        return;
     }
+
+    setConnectionHealth(ConnectionHealth::WaitingHandshake);
 }
 
 void VpnConnection::disconnectFromVpn()
@@ -533,11 +749,217 @@ void VpnConnection::disconnectFromVpn()
 }
 
 void VpnConnection::setConnectionState(Vpn::ConnectionState state) {
-    onConnectionStateChanged(state);
+    const Vpn::ConnectionState previousState = m_connectionState;
 
-    if (state == Vpn::Disconnected && m_connectionState == Vpn::Reconnecting)
+    if (state == Vpn::Disconnected && previousState == Vpn::Reconnecting) {
+        m_connectionState = state;
+        onConnectionStateChanged(state);
+        m_connectionState = previousState;
         return;
+    }
 
     m_connectionState = state;
+    onConnectionStateChanged(state);
     emit connectionStateChanged(state);
+}
+
+void VpnConnection::onProtocolError(ErrorCode error)
+{
+    markLastError(error);
+    if (error == ErrorCode::AmneziaServiceConnectionFailed ||
+        error == ErrorCode::VpnBackendFailure) {
+        setConnectionHealth(ConnectionHealth::LocalServiceUnavailable);
+    }
+    if (m_connectionState == Vpn::ConnectionState::Connecting ||
+        m_connectionState == Vpn::ConnectionState::Reconnecting) {
+        setConnectionState(Vpn::ConnectionState::Error);
+    }
+    emit vpnProtocolError(error);
+}
+
+void VpnConnection::onConnectingTimedOut()
+{
+    if (m_connectionState != Vpn::ConnectionState::Connecting &&
+        m_connectionState != Vpn::ConnectionState::Reconnecting) {
+        return;
+    }
+
+    markLastError(ErrorCode::VpnHandshakeTimeout);
+    setConnectionHealth(ConnectionHealth::HandshakeTimeout);
+    if (!m_vpnProtocol.isNull()) {
+        m_vpnProtocol->stop();
+    }
+    setConnectionState(Vpn::ConnectionState::Error);
+    emit vpnProtocolError(ErrorCode::VpnHandshakeTimeout);
+}
+
+void VpnConnection::checkConnectedHealth()
+{
+    if (m_connectionState != Vpn::ConnectionState::Connected) {
+        stopConnectedHealthCheck();
+        return;
+    }
+    if (m_connectionHealth == ConnectionHealth::Healthy) {
+        startConnectivityProbe();
+        return;
+    }
+    if (m_vpnProtocol.isNull()) {
+        startConnectivityProbe();
+        return;
+    }
+
+    const bool statusRequested = m_vpnProtocol->requestStatus();
+    if (!statusRequested) {
+        startConnectivityProbe();
+        return;
+    }
+
+    ++m_healthChecksWithoutTraffic;
+    if (m_healthChecksWithoutTraffic >= 5) {
+        markLastError(ErrorCode::VpnNoTrafficError);
+        setConnectionHealth(ConnectionHealth::NoTraffic);
+        stopConnectedHealthCheck();
+    }
+}
+
+void VpnConnection::onConnectivityProbeSucceeded()
+{
+    if (m_connectionState != Vpn::ConnectionState::Connected) {
+        stopConnectivityProbe();
+        return;
+    }
+
+    stopConnectivityProbe();
+    markLastError(ErrorCode::NoError);
+    m_noTrafficRecoveryAttempted = false;
+    setConnectionHealth(ConnectionHealth::Healthy);
+}
+
+void VpnConnection::onConnectivityProbeFailed()
+{
+    if (m_connectionState != Vpn::ConnectionState::Connected) {
+        stopConnectivityProbe();
+        return;
+    }
+
+    stopConnectivityProbe();
+    markLastError(ErrorCode::VpnNoTrafficError);
+    setConnectionHealth(ConnectionHealth::NoTraffic);
+    if (!m_noTrafficRecoveryAttempted && !m_vpnProtocol.isNull()) {
+        m_noTrafficRecoveryAttempted = true;
+        setConnectionHealth(ConnectionHealth::Recovering);
+        QTimer::singleShot(0, this, &VpnConnection::reconnectToVpn);
+    }
+}
+
+void VpnConnection::setConnectionHealth(ConnectionHealth health)
+{
+    if (!shouldPublishConnectionHealth(health)) {
+        return;
+    }
+    if (m_connectionHealth == health) {
+        return;
+    }
+
+    const ConnectionHealth previousHealth = m_connectionHealth;
+    m_connectionHealth = health;
+
+    const QString protocolName = m_vpnProtocol
+        ? QString::fromLatin1(m_vpnProtocol->metaObject()->className())
+        : QStringLiteral("none");
+    qInfo().noquote()
+        << "AmneziaDiagnostic event=state_change"
+        << "connection_state=" + QString::number(static_cast<int>(m_connectionState))
+        << "previous_diagnostic=" + QString::number(static_cast<int>(previousHealth))
+        << "diagnostic=" + QString::number(static_cast<int>(health))
+        << "diagnostic_text=" + connectionHealthText(health)
+        << "last_error=" + QString::number(static_cast<int>(m_lastError))
+        << "protocol=" + protocolName
+        << "recovery_attempted=" + QString(m_noTrafficRecoveryAttempted ? "true" : "false");
+
+    emit connectionHealthChanged(health);
+}
+
+bool VpnConnection::shouldPublishConnectionHealth(ConnectionHealth health) const
+{
+    if (m_connectionState == Vpn::ConnectionState::Disconnected) {
+        return health == ConnectionHealth::Idle ||
+               (m_lastError != ErrorCode::NoError && connectionHealthProblem(health));
+    }
+    if (m_connectionState == Vpn::ConnectionState::Error) {
+        return connectionHealthProblem(health);
+    }
+    return true;
+}
+
+void VpnConnection::startConnectingWatchdog()
+{
+    m_connectingTimer.start();
+}
+
+void VpnConnection::stopConnectingWatchdog()
+{
+    m_connectingTimer.stop();
+}
+
+void VpnConnection::startConnectedHealthCheck()
+{
+    m_healthChecksWithoutTraffic = 0;
+    if (!connectionHealthProblem(m_connectionHealth)) {
+        setConnectionHealth(ConnectionHealth::CheckingTraffic);
+    }
+    m_healthTimer.start();
+    QTimer::singleShot(0, this, &VpnConnection::checkConnectedHealth);
+}
+
+void VpnConnection::stopConnectedHealthCheck()
+{
+    m_healthTimer.stop();
+    m_healthChecksWithoutTraffic = 0;
+}
+
+void VpnConnection::startConnectivityProbe()
+{
+    if (m_connectivityProbe) {
+        return;
+    }
+
+    auto *socket = new QTcpSocket(this);
+    m_connectivityProbe.reset(socket);
+
+    connect(socket, &QTcpSocket::connected, this, &VpnConnection::onConnectivityProbeSucceeded);
+    connect(socket, &QTcpSocket::errorOccurred, this, [this](QAbstractSocket::SocketError) {
+        onConnectivityProbeFailed();
+    });
+
+    QPointer<QTcpSocket> probe(socket);
+    QTimer::singleShot(5000, this, [this, probe]() {
+        if (probe && m_connectivityProbe.data() == probe && probe->state() != QAbstractSocket::ConnectedState) {
+            onConnectivityProbeFailed();
+        }
+    });
+
+    connectConnectivityProbe(socket);
+}
+
+void VpnConnection::stopConnectivityProbe()
+{
+    if (!m_connectivityProbe) {
+        return;
+    }
+
+    QTcpSocket *probe = m_connectivityProbe.take();
+    probe->disconnect(this);
+    probe->abort();
+    probe->deleteLater();
+}
+
+void VpnConnection::connectConnectivityProbe(QTcpSocket *socket)
+{
+    socket->connectToHost(QStringLiteral("1.1.1.1"), 443);
+}
+
+void VpnConnection::markLastError(ErrorCode error)
+{
+    m_lastError = error;
 }

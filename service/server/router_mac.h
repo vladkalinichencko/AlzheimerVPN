@@ -3,10 +3,12 @@
 
 #include <QTimer>
 #include <QString>
+#include <QStringList>
 #include <QSettings>
 #include <QHash>
 #include <QDebug>
 #include <QObject>
+#include <QList>
 
 #include "../client/platforms/macos/daemon/dnsutilsmacos.h"
 
@@ -34,18 +36,21 @@ public:
     bool deleteTun(const QString &dev);
     bool updateResolvers(const QString& ifname, const QList<QHostAddress>& resolvers);
     bool restoreResolvers();
+    bool configureDnsSplitTunnel(const QStringList &rules, const QString &gw, bool killSwitchEnabled);
     bool routeAddXray(const QString& ifname, const QString& gateway);
     bool routeDeleteXray(const QString& ifname, const QString& gateway);
     
 public slots:
 
 private:
-    RouterMac() {m_dnsUtil = new DnsUtilsMacos(this);}
+    RouterMac();
     RouterMac(RouterMac const &) = delete;
     RouterMac& operator= (RouterMac const&) = delete;
 
     QList<Route> m_addedRoutes;
-    DnsUtilsMacos *m_dnsUtil;    
+    DnsUtilsMacos *m_dnsUtil;
+    QString m_dnsSplitTunnelGateway;
+    bool m_dnsSplitTunnelKillSwitchEnabled = false;
 };
 
 #endif // ROUTERMAC_H

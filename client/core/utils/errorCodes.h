@@ -63,6 +63,9 @@ namespace amnezia
         OpenVpnUnknownError = 701,
         OpenVpnTapAdapterError = 702,
         AddressPoolError = 703,
+        VpnHandshakeTimeout = 704,
+        VpnNoTrafficError = 705,
+        VpnBackendFailure = 706,
 
         // 3rd party utils errors
         OpenSslFailed = 800,
@@ -115,5 +118,4 @@ namespace amnezia
 Q_DECLARE_METATYPE(amnezia::ErrorCode)
 
 #endif // ERRORCODES_H
-
 

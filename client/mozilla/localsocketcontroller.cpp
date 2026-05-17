@@ -37,6 +37,14 @@ constexpr int CONNECTION_RETRY_TIMER_MSEC = 500;
 
 namespace {
 Logger logger("LocalSocketController");
+
+#ifndef AMNEZIA_DAEMON_RUN_DIR
+#define AMNEZIA_DAEMON_RUN_DIR "/var/run/amneziavpn"
+#endif
+
+#ifndef AMNEZIA_DAEMON_TMP_SOCKET
+#define AMNEZIA_DAEMON_TMP_SOCKET "/tmp/amneziavpn.socket"
+#endif
 }
 
 LocalSocketController::LocalSocketController() {
@@ -105,9 +113,9 @@ void LocalSocketController::initializeInternal() {
 #ifdef MZ_WINDOWS
   QString path = "\\\\.\\pipe\\amneziavpn";
 #else
-  QString path = "/var/run/amneziavpn/daemon.socket";
+  QString path = QStringLiteral(AMNEZIA_DAEMON_RUN_DIR) + QStringLiteral("/daemon.socket");
   if (!QFileInfo::exists(path)) {
-    path = "/tmp/amneziavpn.socket";
+    path = QStringLiteral(AMNEZIA_DAEMON_TMP_SOCKET);
   }
 #endif
 
@@ -498,14 +506,14 @@ void LocalSocketController::parseCommand(const QByteArray& command) {
     if (!obj.contains("errorCode")) {
       // report a generic error if we dont know what it is.
       logger.error() << "generic backend failure error";
-      // REPORTERROR(ErrorHandler::ControllerError, "controller");
+      emit backendFailure(amnezia::ErrorCode::VpnBackendFailure);
       return;
     }
     auto errorCode = static_cast<uint8_t>(obj["errorCode"].toInt());
     if (errorCode >= (uint8_t)DaemonError::DAEMON_ERROR_MAX) {
       // Also report a generic error if the code is invalid.
       logger.error() << "invalid backend failure error code";
-      // REPORTERROR(ErrorHandler::ControllerError, "controller");
+      emit backendFailure(amnezia::ErrorCode::VpnBackendFailure);
       return;
     }
     switch (static_cast<DaemonError>(errorCode)) {
@@ -513,7 +521,7 @@ void LocalSocketController::parseCommand(const QByteArray& command) {
         [[fallthrough]];
       case DaemonError::ERROR_FATAL:
         logger.error() << "generic backend failure error (fatal or error none)";
-        // REPORTERROR(ErrorHandler::ControllerError, "controller");
+        emit backendFailure(amnezia::ErrorCode::VpnBackendFailure);
         break;
       case DaemonError::ERROR_SPLIT_TUNNEL_INIT_FAILURE:
         [[fallthrough]];
@@ -521,7 +529,7 @@ void LocalSocketController::parseCommand(const QByteArray& command) {
         [[fallthrough]];
       case DaemonError::ERROR_SPLIT_TUNNEL_EXCLUDE_FAILURE:
         logger.error() << "split tunnel backend failure error";
-        //REPORTERROR(ErrorHandler::SplitTunnelError, "controller");
+        emit backendFailure(amnezia::ErrorCode::VpnBackendFailure);
         break;
       case DaemonError::DAEMON_ERROR_MAX:
         // We should not get here.

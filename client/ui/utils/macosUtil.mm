@@ -1,7 +1,6 @@
 #include "macosUtil.h"
 
 #include <QMainWindow>
-#include <QProcess>
 
 #include <Cocoa/Cocoa.h>
 
@@ -28,11 +27,10 @@
 
 void setDockIconVisible(bool visible)
 {
-    ProcessSerialNumber psn = { 0, kCurrentProcess };
     if (visible) {
-        TransformProcessType(&psn, kProcessTransformToForegroundApplication);
+        [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
     } else {
-        TransformProcessType(&psn, kProcessTransformToBackgroundApplication);
+        [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
     }
 }
 
@@ -50,9 +48,7 @@ void setDockIconVisible(bool visible)
 + (void)closeButtonAction:(id)sender
 {
     Q_UNUSED(sender);
-    ProcessSerialNumber pn;
-    GetFrontProcess(&pn);
-    ShowHideProcess(&pn, false);
+    [NSApp hide:nil];
 }
 - (void)zoomButtonAction:(id)sender
 {

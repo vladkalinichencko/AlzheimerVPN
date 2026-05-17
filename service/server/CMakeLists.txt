@@ -27,7 +27,11 @@ include_directories(
 set(HEADERS
     ${CMAKE_CURRENT_LIST_DIR}/../../client/core/utils/utilities.h
     ${CMAKE_CURRENT_LIST_DIR}/../../client/secureQSettings.h
+    ${CMAKE_CURRENT_LIST_DIR}/../../client/core/utils/errorCodes.h
     ${CMAKE_CURRENT_LIST_DIR}/../../client/core/utils/networkUtilities.h
+    ${CMAKE_CURRENT_LIST_DIR}/../../client/core/utils/dnsMessageParser.h
+    ${CMAKE_CURRENT_LIST_DIR}/../../client/core/utils/splitTunnelRoutePlanner.h
+    ${CMAKE_CURRENT_LIST_DIR}/../../client/core/utils/splitTunnelRule.h
     ${CMAKE_CURRENT_LIST_DIR}/../../ipc/ipc.h
     ${CMAKE_CURRENT_LIST_DIR}/../../ipc/ipcserver.h
     ${CMAKE_CURRENT_LIST_DIR}/../../ipc/ipcserverprocess.h
@@ -50,6 +54,9 @@ set(SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/../../client/core/utils/utilities.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../client/secureQSettings.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../client/core/utils/networkUtilities.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../client/core/utils/dnsMessageParser.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../client/core/utils/splitTunnelRoutePlanner.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../client/core/utils/splitTunnelRule.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../ipc/ipcserver.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../ipc/ipcserverprocess.cpp
     ${CMAKE_CURRENT_LIST_DIR}/localserver.cpp
@@ -221,6 +228,7 @@ if(APPLE)
         ${CMAKE_CURRENT_SOURCE_DIR}/../../client/platforms/macos/macospingsender.h
 
         ${CMAKE_CURRENT_SOURCE_DIR}/../../client/platforms/macos/daemon/dnsutilsmacos.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../client/platforms/macos/daemon/dnssplitrouteobserver.h
         ${CMAKE_CURRENT_SOURCE_DIR}/../../client/platforms/macos/daemon/iputilsmacos.h
         ${CMAKE_CURRENT_SOURCE_DIR}/../../client/platforms/macos/daemon/macosdaemon.h
         ${CMAKE_CURRENT_SOURCE_DIR}/../../client/platforms/macos/daemon/macosroutemonitor.h
@@ -235,6 +243,7 @@ if(APPLE)
         ${CMAKE_CURRENT_SOURCE_DIR}/../../client/platforms/macos/macospingsender.cpp
 
         ${CMAKE_CURRENT_SOURCE_DIR}/../../client/platforms/macos/daemon/dnsutilsmacos.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../client/platforms/macos/daemon/dnssplitrouteobserver.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/../../client/platforms/macos/daemon/iputilsmacos.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/../../client/platforms/macos/daemon/macosdaemon.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/../../client/platforms/macos/daemon/macosroutemonitor.cpp
@@ -303,7 +312,13 @@ include_directories(
 
 add_executable(${PROJECT} ${SOURCES} ${HEADERS} ${RESOURCES})
 target_link_libraries(${PROJECT} PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::RemoteObjects Qt6::Core5Compat Qt6::DBus Qt6::Concurrent ${LIBS})
-target_compile_definitions(${PROJECT} PRIVATE "MZ_$<UPPER_CASE:${MZ_PLATFORM_NAME}>")
+target_compile_definitions(${PROJECT} PRIVATE
+    "MZ_$<UPPER_CASE:${MZ_PLATFORM_NAME}>"
+    AMNEZIA_IPC_SERVICE_URL="${AMNEZIA_IPC_SERVICE_URL}"
+    AMNEZIA_DAEMON_RUN_DIR="${AMNEZIA_DAEMON_RUN_DIR}"
+    AMNEZIA_WG_RUNTIME_DIR="${AMNEZIA_WG_RUNTIME_DIR}"
+    AMNEZIA_DAEMON_TMP_SOCKET="${AMNEZIA_DAEMON_TMP_SOCKET}"
+)
 
 find_package(amnezia-xray-bindings REQUIRED)
 target_link_libraries(${PROJECT} PRIVATE amnezia::xray-bindings)

@@ -17,6 +17,7 @@ ConnectionUiController::ConnectionUiController(ConnectionController* connectionC
       m_serversController(serversController)
 {
     connect(m_connectionController, &ConnectionController::connectionStateChanged, this, &ConnectionUiController::onConnectionStateChanged);
+    connect(m_connectionController, &ConnectionController::connectionHealthChanged, this, &ConnectionUiController::onConnectionHealthChanged);
 
     connect(this, &ConnectionUiController::connectButtonClicked, this, &ConnectionUiController::toggleConnection, Qt::QueuedConnection);
 
@@ -48,16 +49,16 @@ ErrorCode ConnectionUiController::getLastConnectionError()
 void ConnectionUiController::onConnectionStateChanged(Vpn::ConnectionState state)
 {
     m_state = state;
+    m_health = m_connectionController->connectionHealth();
 
     m_isConnected = false;
-    m_connectionStateText = tr("Connecting...");
+    updateConnectionStateText();
     switch (state) {
     case Vpn::ConnectionState::Connected: {
         amnApp->networkManager()->clearConnectionCache();
 
         m_isConnectionInProgress = false;
         m_isConnected = true;
-        m_connectionStateText = tr("Connected");
         break;
     }
     case Vpn::ConnectionState::Connecting: {
@@ -66,37 +67,38 @@ void ConnectionUiController::onConnectionStateChanged(Vpn::ConnectionState state
     }
     case Vpn::ConnectionState::Reconnecting: {
         m_isConnectionInProgress = true;
-        m_connectionStateText = tr("Reconnecting...");
         break;
     }
     case Vpn::ConnectionState::Disconnected: {
         m_isConnectionInProgress = false;
-        m_connectionStateText = tr("Connect");
         break;
     }
     case Vpn::ConnectionState::Disconnecting: {
         m_isConnectionInProgress = true;
-        m_connectionStateText = tr("Disconnecting...");
         break;
     }
     case Vpn::ConnectionState::Preparing: {
         m_isConnectionInProgress = true;
-        m_connectionStateText = tr("Preparing...");
         break;
     }
     case Vpn::ConnectionState::Error: {
         m_isConnectionInProgress = false;
-        m_connectionStateText = tr("Connect");
         emit connectionErrorOccurred(getLastConnectionError());
         break;
     }
     case Vpn::ConnectionState::Unknown: {
         m_isConnectionInProgress = false;
-        m_connectionStateText = tr("Connect");
         emit connectionErrorOccurred(getLastConnectionError());
         break;
     }
     }
+    emit connectionStateChanged();
+}
+
+void ConnectionUiController::onConnectionHealthChanged(ConnectionHealth health)
+{
+    m_health = health;
+    updateConnectionStateText();
     emit connectionStateChanged();
 }
 
@@ -123,6 +125,29 @@ Vpn::ConnectionState ConnectionUiController::getCurrentConnectionState()
 QString ConnectionUiController::connectionStateText() const
 {
     return m_connectionStateText;
+}
+
+QString ConnectionUiController::connectionDiagnosticText() const
+{
+    return m_connectionDiagnosticText;
+}
+
+bool ConnectionUiController::hasConnectionDiagnostic() const
+{
+    return m_hasConnectionDiagnostic;
+}
+
+bool ConnectionUiController::isConnectionDiagnosticProblem() const
+{
+    return m_isConnectionDiagnosticProblem;
+}
+
+void ConnectionUiController::updateConnectionStateText()
+{
+    m_connectionStateText = connectionLifecycleText(m_state);
+    m_connectionDiagnosticText = connectionHealthText(m_health);
+    m_hasConnectionDiagnostic = connectionHealthVisible(m_health);
+    m_isConnectionDiagnosticProblem = connectionHealthProblem(m_health);
 }
 
 void ConnectionUiController::toggleConnection()

@@ -11,8 +11,10 @@
 #include <QHostAddress>
 #include <QMap>
 #include <QString>
+#include <QStringList>
 
 #include "daemon/dnsutils.h"
+#include "dnssplitrouteobserver.h"
 
 class DnsUtilsMacos final : public DnsUtils {
   Q_OBJECT
@@ -24,6 +26,10 @@ class DnsUtilsMacos final : public DnsUtils {
   bool updateResolvers(const QString& ifname,
                        const QList<QHostAddress>& resolvers) override;
   bool restoreResolvers() override;
+  void configureSplitTunnelRules(const QStringList& rules);
+
+signals:
+  void splitTunnelHostResolved(const QString& host, const QStringList& ips);
 
  private:
   void backupResolvers();
@@ -46,6 +52,8 @@ class DnsUtilsMacos final : public DnsUtils {
 
   SCDynamicStoreRef m_scStore = nullptr;
   QMap<QString, DnsBackup> m_prevServices;
+  QList<QHostAddress> m_currentResolvers;
+  DnsSplitRouteObserver m_splitRouteObserver;
 };
 
 #endif  // DNSUTILSMACOS_H

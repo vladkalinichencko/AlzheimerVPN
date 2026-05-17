@@ -1,5 +1,6 @@
 #include "router_mac.h"
 #include "helper_route_mac.h"
+#include "killswitch.h"
 
 #include <QProcess>
 #include <QThread>
@@ -10,6 +11,22 @@ RouterMac &RouterMac::Instance()
 {
     static RouterMac s;
     return s;
+}
+
+RouterMac::RouterMac()
+{
+    m_dnsUtil = new DnsUtilsMacos(this);
+    connect(m_dnsUtil, &DnsUtilsMacos::splitTunnelHostResolved, this,
+            [this](const QString &host, const QStringList &ips) {
+                Q_UNUSED(host);
+                if (m_dnsSplitTunnelGateway.isEmpty() || ips.isEmpty()) {
+                    return;
+                }
+                routeAddList(m_dnsSplitTunnelGateway, ips);
+                if (m_dnsSplitTunnelKillSwitchEnabled) {
+                    KillSwitch::instance()->addAllowedRange(ips);
+                }
+            });
 }
 
 bool RouterMac::routeAdd(const QString &ipWithSubnet, const QString &gw)
@@ -160,6 +177,14 @@ bool RouterMac::updateResolvers(const QString& ifname, const QList<QHostAddress>
 
 bool RouterMac::restoreResolvers() {
     return m_dnsUtil->restoreResolvers();
+}
+
+bool RouterMac::configureDnsSplitTunnel(const QStringList &rules, const QString &gw, bool killSwitchEnabled)
+{
+    m_dnsSplitTunnelGateway = gw;
+    m_dnsSplitTunnelKillSwitchEnabled = killSwitchEnabled;
+    m_dnsUtil->configureSplitTunnelRules(rules);
+    return true;
 }
 
 bool RouterMac::routeAddXray(const QString& ifname, const QString& gateway)

@@ -1,5 +1,4 @@
 #import <UIKit/UIKit.h>
-#import <objc/runtime.h>
 #include <dispatch/dispatch.h>
 
 #include <QByteArray>
@@ -7,10 +6,6 @@
 #include <QString>
 
 #include "ios_controller.h"
-
-using SceneOpenURLContexts = void (*)(id, SEL, UIScene *, NSSet<UIOpenURLContext *> *);
-
-static SceneOpenURLContexts g_originalSceneOpenURLContexts = nullptr;
 
 static void amnezia_handleURL(NSURL *url)
 {
@@ -23,7 +18,7 @@ static void amnezia_handleURL(NSURL *url)
         return;
     }
 
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_async(dispatch_get_main_queue(), ^{
         if (filePath.contains("backup")) {
             IosController::Instance()->importBackupFromOutside(filePath);
             return;
@@ -39,43 +34,29 @@ static void amnezia_handleURL(NSURL *url)
     });
 }
 
-static void amnezia_scene_openURLContexts(id self, SEL _cmd, UIScene *scene, NSSet<UIOpenURLContext *> *contexts)
+@interface QIOSWindowSceneDelegate : UIResponder <UIWindowSceneDelegate>
+- (void)scene:(UIScene *)scene openURLContexts:(NSSet<UIOpenURLContext *> *)URLContexts API_AVAILABLE(ios(13.0));
+@end
+
+@interface AmneziaSceneDelegate : QIOSWindowSceneDelegate
+@end
+
+@implementation AmneziaSceneDelegate
+
+- (void)scene:(UIScene *)scene openURLContexts:(NSSet<UIOpenURLContext *> *)contexts
 {
-    if (g_originalSceneOpenURLContexts) {
-        g_originalSceneOpenURLContexts(self, _cmd, scene, contexts);
-    }
-
-    if (!contexts || contexts.count == 0) {
-        return;
-    }
-
     if (@available(iOS 13.0, *)) {
+        if ([QIOSWindowSceneDelegate instancesRespondToSelector:_cmd]) {
+            [super scene:scene openURLContexts:contexts];
+        }
+
+        if (!contexts || contexts.count == 0) {
+            return;
+        }
+
         for (UIOpenURLContext *context in contexts) {
             amnezia_handleURL(context.URL);
         }
-    }
-}
-
-@interface AmneziaSceneDelegateHooks : NSObject
-@end
-
-@implementation AmneziaSceneDelegateHooks
-
-+ (void)load
-{
-    Class cls = objc_getClass("QIOSWindowSceneDelegate");
-    if (!cls) {
-        return;
-    }
-
-    SEL selector = @selector(scene:openURLContexts:);
-    Method method = class_getInstanceMethod(cls, selector);
-    if (method) {
-        g_originalSceneOpenURLContexts = reinterpret_cast<SceneOpenURLContexts>(method_getImplementation(method));
-        method_setImplementation(method, reinterpret_cast<IMP>(amnezia_scene_openURLContexts));
-    } else {
-        const char *types = "v@:@@";
-        class_addMethod(cls, selector, reinterpret_cast<IMP>(amnezia_scene_openURLContexts), types);
     }
 }
 
