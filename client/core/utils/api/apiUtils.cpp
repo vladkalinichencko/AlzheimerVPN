@@ -9,6 +9,8 @@
 #include <QJsonValue>
 #include <QTextStream>
 
+#include "version.h"
+
 using namespace amnezia;
 
 namespace
@@ -39,7 +41,7 @@ namespace
     void writeApiFailureLog(const QString &replyErrorString, const QNetworkReply::NetworkError &replyError, const int httpStatusCode,
                             const QByteArray &responseBody)
     {
-        QFile file(QStringLiteral("/tmp/AmneziaVPNFork-api.log"));
+        QFile file(QStringLiteral("/tmp/%1-api.log").arg(QStringLiteral(APPLICATION_NAME)));
         if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
             return;
         }

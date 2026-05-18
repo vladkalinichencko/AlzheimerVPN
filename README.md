@@ -153,8 +153,8 @@ Before trusting an installed build, compare the built, staged, and installed bin
 
 ```bash
 shasum -a 256 \
-  /private/tmp/AmneziaVPNFork.app/Contents/MacOS/AmneziaVPN \
-  /Applications/AmneziaVPNFork.app/Contents/MacOS/AmneziaVPN
+  /private/tmp/AlzheimerVPN.app/Contents/MacOS/AmneziaVPN \
+  /Applications/AlzheimerVPN.app/Contents/MacOS/AmneziaVPN
 ```
 
 ## Upstream Shape
