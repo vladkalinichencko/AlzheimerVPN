@@ -123,8 +123,40 @@ Local macOS build:
 export CONAN_HOME="$HOME/.conan2"
 cmake -S . -B /private/tmp/alzheimervpn-build \
   -DCMAKE_BUILD_TYPE=Release
-cmake --build /private/tmp/alzheimervpn-build --target AmneziaVPN -- -j4
+cmake --build /private/tmp/alzheimervpn-build \
+  --target AmneziaVPN AlzheimerVPN-service -- -j4
 ```
+
+Local macOS staging:
+
+```bash
+rm -rf /private/tmp/AlzheimerVPN.app
+cp -R /private/tmp/alzheimervpn-build/client/AmneziaVPN.app \
+  /private/tmp/AlzheimerVPN.app
+
+cp /private/tmp/alzheimervpn-build/service/server/AlzheimerVPN-service \
+  /private/tmp/AlzheimerVPN.app/Contents/MacOS/AlzheimerVPN-service
+cp /private/tmp/alzheimervpn-build/service/server/amneziawg-go \
+  /private/tmp/AlzheimerVPN.app/Contents/MacOS/amneziawg-go
+cp /private/tmp/alzheimervpn-build/service/server/openvpn \
+  /private/tmp/AlzheimerVPN.app/Contents/MacOS/openvpn
+cp /private/tmp/alzheimervpn-build/service/server/tun2socks \
+  /private/tmp/AlzheimerVPN.app/Contents/MacOS/tun2socks
+cp /private/tmp/alzheimervpn-build/service/server/geoip.dat \
+  /private/tmp/AlzheimerVPN.app/Contents/MacOS/geoip.dat
+cp /private/tmp/alzheimervpn-build/service/server/geosite.dat \
+  /private/tmp/AlzheimerVPN.app/Contents/MacOS/geosite.dat
+
+chmod 755 \
+  /private/tmp/AlzheimerVPN.app/Contents/MacOS/AlzheimerVPN-service \
+  /private/tmp/AlzheimerVPN.app/Contents/MacOS/amneziawg-go \
+  /private/tmp/AlzheimerVPN.app/Contents/MacOS/openvpn \
+  /private/tmp/AlzheimerVPN.app/Contents/MacOS/tun2socks
+```
+
+The staged bundle is not valid without those service-side runtime files. If
+`amneziawg-go` is missing from `Contents/MacOS`, connection attempts fail as
+`ErrorCode: 706. Local VPN service failed`.
 
 Repository build scripts:
 
@@ -155,6 +187,16 @@ Before trusting an installed build, compare the built, staged, and installed bin
 shasum -a 256 \
   /private/tmp/AlzheimerVPN.app/Contents/MacOS/AmneziaVPN \
   /Applications/AlzheimerVPN.app/Contents/MacOS/AmneziaVPN
+```
+
+Also verify the helper files used by the privileged service:
+
+```bash
+ls -l /Applications/AlzheimerVPN.app/Contents/MacOS/amneziawg-go \
+  /Applications/AlzheimerVPN.app/Contents/MacOS/openvpn \
+  /Applications/AlzheimerVPN.app/Contents/MacOS/tun2socks \
+  /Applications/AlzheimerVPN.app/Contents/MacOS/geoip.dat \
+  /Applications/AlzheimerVPN.app/Contents/MacOS/geosite.dat
 ```
 
 ## Upstream Shape
