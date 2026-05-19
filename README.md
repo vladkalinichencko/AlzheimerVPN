@@ -54,15 +54,21 @@ This fork updates Apple-platform build and runtime glue around the current imple
 
 ### 🛠 Stability Fixes Summary
 
-- URL-like split-tunneling input is normalized to a routable hostname.
-- Dynamic DNS targets are re-resolved on connect/reconnect with a single retry on partial route failure.
-- Bypass route IPs and kill-switch allow-list are kept in sync.
+- URL-like split-tunneling input is normalized to a routable hostname; scheme, path, whitespace and casing no longer break a rule.
+- Domain split-tunnel rules are resolved to concrete IPv4 routes at connect time, with a single DNS re-resolution retry on partial route failure.
+- DNS-derived split-tunnel routes are refreshed when upstream IPs rotate, instead of going stale.
+- macOS route monitor no longer marks a route as added when the kernel route add actually failed.
+- Duplicate route add (`already exists`) is treated as success, not as a route failure.
+- Bypass route IPs and the kill-switch allow-list are kept in sync.
+- The app no longer reports "connected" while DNS or traffic actually do not pass — the lifecycle reaches connected only when traffic verification succeeds.
+- The connecting state is bounded by a watchdog and the diagnostic text identifies which stage stalled.
+- Vague generic errors (including `No error` and unknown) are replaced with structured, attributable failures.
 - Diagnostic text is gated by the current lifecycle state, so cleanup work after disconnect cannot overwrite a real failure.
+- DNS, route, backend and traffic failures are surfaced as distinct diagnostic states rather than one generic message.
 - API failure logging records HTTP status, Qt network error, response body, and endpoint.
 - AmneziaWG on macOS no longer loses its session shortly after handshake — the client-app legacy DNS path no longer races the daemon-side DNS observer.
 - Userspace WireGuard / AmneziaWG backend always runs with debug logging, so handshake-level failures are diagnosable in release builds.
 - The backend executable is selected from the protocol name, falling back to `wireguard-go` when no AmneziaWG obfuscation parameters are configured.
-- Stale exclusion routes are no longer remembered when a kernel route add fails.
 
 ## Where The Code Changed
 
