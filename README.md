@@ -43,36 +43,6 @@ The UI displays diagnostic text only after `VpnConnection` decides that the diag
 
 API failures are also logged as structured events, including HTTP status, Qt network error, response body, and endpoint. A generic “configuration retrieval failed” error becomes something a developer can trace.
 
-### 🔐 AmneziaWG Handshake Retention On macOS
-
-AmneziaWG over `amneziawg-go` on macOS lost its session ~15 seconds after the
-first handshake. The reason was structural: the OpenVPN-era `VpnConnection`
-lifecycle code in the client app and the new daemon-side DNS observer were
-both writing to the system DNS configuration. On every `Connected` transition
-the client-app side ran `flushDns` → `killall -HUP mDNSResponder`, blowing the
-DNS cache exactly when the daemon-side observer had just bound to it. The
-WireGuard rekey that follows could not complete because the kernel state for
-the matching DNS path was being reset in parallel.
-
-The fork now skips the entire legacy IPC route/DNS path in `VpnConnection`
-for WG-family containers (AmneziaWG and stock WireGuard). For those protocols
-all route, DNS and split-tunnel management lives in the daemon. The legacy
-path stays in place for OpenVPN, Cloak, Shadowsocks and other non-WG
-containers that depend on it.
-
-Two related practical fixes ride along:
-
-- The userspace backend (`amneziawg-go` / `wireguard-go`) is now always
-  launched with `LOG_LEVEL=debug`. Without it, release builds were silent
-  about handshake state and protocol-level failures were undiagnosable.
-- The daemon now receives the protocol name in its activate payload and
-  picks the backend executable accordingly. When the protocol is plain
-  WireGuard, or when no AmneziaWG obfuscation parameters are configured,
-  the daemon falls back to `wireguard-go` instead of `amneziawg-go` — this
-  avoids `amneziawg-go` interpreting plain WireGuard DATA packets as
-  malformed (`Received message with unknown type`) when there is no
-  obfuscation to apply.
-
 ### 🍎 macOS And Apple Platform Cleanup
 
 This fork updates Apple-platform build and runtime glue around the current implementation line:
@@ -81,6 +51,18 @@ This fork updates Apple-platform build and runtime glue around the current imple
 - CMake-controlled app naming;
 - native macOS/iOS lifecycle cleanup where it affects build or runtime behavior;
 - separate fork identity for local validation, so the original installed app does not need to be overwritten during development.
+
+### 🛠 Stability Fixes Summary
+
+- URL-like split-tunneling input is normalized to a routable hostname.
+- Dynamic DNS targets are re-resolved on connect/reconnect with a single retry on partial route failure.
+- Bypass route IPs and kill-switch allow-list are kept in sync.
+- Diagnostic text is gated by the current lifecycle state, so cleanup work after disconnect cannot overwrite a real failure.
+- API failure logging records HTTP status, Qt network error, response body, and endpoint.
+- AmneziaWG on macOS no longer loses its session shortly after handshake — the client-app legacy DNS path no longer races the daemon-side DNS observer.
+- Userspace WireGuard / AmneziaWG backend always runs with debug logging, so handshake-level failures are diagnosable in release builds.
+- The backend executable is selected from the protocol name, falling back to `wireguard-go` when no AmneziaWG obfuscation parameters are configured.
+- Stale exclusion routes are no longer remembered when a kernel route add fails.
 
 ## Where The Code Changed
 
@@ -151,29 +133,10 @@ Local macOS build:
 
 ```bash
 export CONAN_HOME="$HOME/.conan2"
-# If Conan was installed via pip and is not on PATH, prepend its bin dir.
-# Adjust the Python version if yours differs.
-export PATH="$HOME/Library/Python/3.12/bin:$PATH"
-
 cmake -S . -B /private/tmp/alzheimervpn-build \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_OSX_ARCHITECTURES=arm64
+  -DCMAKE_BUILD_TYPE=Release
 cmake --build /private/tmp/alzheimervpn-build \
   --target AmneziaVPN AlzheimerVPN-service -- -j4
-```
-
-`-DCMAKE_OSX_ARCHITECTURES=arm64` is important on Apple Silicon: Homebrew Qt
-ships as arm64-only, and CMake will otherwise pick a default that links
-against an architecture Qt does not provide, failing with
-`_qt_version_tag_6_<n>` undefined symbols at the link step.
-
-If the first `cmake -S . -B …` invocation cannot resolve Conan-provided
-packages (typically `amnezia-xray-bindings`), drop the build directory and
-let CMake-Conan run its bootstrap from a clean state:
-
-```bash
-rm -rf /private/tmp/alzheimervpn-build
-# then re-run the cmake -S . -B … command above
 ```
 
 Local macOS staging:
