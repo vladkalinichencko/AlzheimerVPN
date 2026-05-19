@@ -143,6 +143,9 @@ void LocalSocketController::activate(const QJsonObject &rawConfig) {
 
   QJsonObject json;
   json.insert("type", "activate");
+  // Wire-protocol name lets the daemon pick the matching userspace backend
+  // (wireguard-go vs amneziawg-go).
+  json.insert("protocol", protocolName);
   //  json.insert("hopindex", QJsonValue((double)hop.m_hopindex));
   json.insert("privateKey", wgConfig.value(amnezia::configKey::clientPrivKey));
   json.insert("deviceIpv4Address", wgConfig.value(amnezia::configKey::clientIp));
@@ -299,6 +302,30 @@ void LocalSocketController::activate(const QJsonObject &rawConfig) {
     json.insert(amnezia::configKey::specialJunk4, wgConfig.value(amnezia::configKey::specialJunk4));
     json.insert(amnezia::configKey::specialJunk5, wgConfig.value(amnezia::configKey::specialJunk5));
   }
+
+  // Diagnostic: which AmneziaWG obfuscation params are present in the activate
+  // payload. Values intentionally not logged — only presence is interesting.
+  auto awgPresent = [&](const char* k) {
+    const QJsonValue v = json.value(k);
+    return v.isNull() || v.isUndefined() || v.toString().isEmpty() ? '-' : '+';
+  };
+  logger.debug() << "AWG params to daemon:"
+                 << "Jc=" << awgPresent("Jc")
+                 << "Jmin=" << awgPresent("Jmin")
+                 << "Jmax=" << awgPresent("Jmax")
+                 << "S1=" << awgPresent("S1")
+                 << "S2=" << awgPresent("S2")
+                 << "S3=" << awgPresent("S3")
+                 << "S4=" << awgPresent("S4")
+                 << "H1=" << awgPresent("H1")
+                 << "H2=" << awgPresent("H2")
+                 << "H3=" << awgPresent("H3")
+                 << "H4=" << awgPresent("H4")
+                 << "I1=" << awgPresent("I1")
+                 << "I2=" << awgPresent("I2")
+                 << "I3=" << awgPresent("I3")
+                 << "I4=" << awgPresent("I4")
+                 << "I5=" << awgPresent("I5");
 
   write(json);
 }

@@ -23,6 +23,9 @@ class InterfaceConfig {
   Q_ENUM(HopType)
 
   HopType m_hopType;
+  // Wire-protocol name from the client UI ("wireguard", "awg", ...). Empty
+  // when not provided. Used by WireguardUtilsMacos to pick the right backend.
+  QString m_protocolName;
   QString m_privateKey;
   QString m_deviceIpv4Address;
   QString m_deviceIpv6Address;

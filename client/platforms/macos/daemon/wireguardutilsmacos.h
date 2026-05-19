@@ -51,6 +51,12 @@ class WireguardUtilsMacos final : public WireguardUtils {
   QString uapiCommand(const QString& command);
   static int uapiErrno(const QString& command);
   QString waitForTunnelName(const QString& filename);
+  // Pick the userspace backend executable based on protocolName and whether
+  // any AmneziaWG obfuscation parameters are actually configured. Falls back
+  // to plain wireguard-go when running amneziawg-go would not produce any
+  // obfuscation anyway — that case is observed to break post-handshake DATA
+  // exchange against a vanilla wireguard server.
+  static QString backendExecutableName(const InterfaceConfig& config);
 
   QString m_ifname;
   QProcess m_tunnel;

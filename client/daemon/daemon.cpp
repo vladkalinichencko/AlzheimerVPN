@@ -304,6 +304,8 @@ bool Daemon::parseConfig(const QJsonObject& obj, InterfaceConfig& config) {
     config.m_secondaryDnsServer = value.toString();
   }
 
+  config.m_protocolName = obj.value("protocol").toString();
+
   if (!obj.contains("hopType")) {
     config.m_hopType = InterfaceConfig::SingleHop;
   } else {

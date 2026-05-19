@@ -152,6 +152,29 @@ void VpnConnection::onConnectionStateChanged(Vpn::ConnectionState state)
     ServerConfig defaultServer = m_serversRepository->server(m_serversRepository->defaultServerIndex());
     DockerContainer container = defaultServer.defaultContainer();
 
+    // AWG / WireGuard route/DNS/split-tunnel management lives entirely in the
+    // daemon (Daemon::activate -> WireguardUtilsMacos -> MacosRouteMonitor +
+    // DnsUtilsMacos). The legacy IPC path below is OpenVPN-era and would race
+    // with the daemon (flushDns->killall mDNSResponder, etc.), so we skip the
+    // whole block for WG-family protocols.
+    const bool legacyRouting = !ContainerUtils::isAwgContainer(container)
+                               && container != DockerContainer::WireGuard;
+    if (!legacyRouting) {
+#if defined(Q_OS_IOS) || defined(MACOS_NE)
+        if (state == Vpn::ConnectionState::Connected ||
+            state == Vpn::ConnectionState::Connecting ||
+            state == Vpn::ConnectionState::Reconnecting) {
+            m_checkTimer.start();
+        } else {
+            m_checkTimer.stop();
+        }
+#endif
+        if (state == Vpn::ConnectionState::Connected) {
+            startConnectedHealthCheck();
+        }
+        return;
+    }
+
     IpcClient::withInterface([&](QSharedPointer<IpcInterfaceReplica> iface) {
         switch (state) {
             case Vpn::ConnectionState::Connected: {
@@ -266,8 +289,20 @@ void VpnConnection::setRepositories(SecureServersRepository* serversRepository, 
 void VpnConnection::addSitesRoutes(const QString &gw, amnezia::RouteMode mode)
 {
 #ifdef AMNEZIA_DESKTOP
-    if (!m_appSettingsRepository) {
+    if (!m_appSettingsRepository || !m_serversRepository) {
         qCritical() << "VpnConnection::addSitesRoutes: repositories not initialized";
+        return;
+    }
+
+    // Defense in depth: skip the legacy IPC route/flush path for WG-family
+    // protocols. The daemon owns DNS and split-tunnel routes for them; running
+    // this would race with the daemon and break AmneziaWG handshake retention
+    // (see legacyRouting guard in onConnectionStateChanged).
+    const DockerContainer container =
+        m_serversRepository->server(m_serversRepository->defaultServerIndex())
+            .defaultContainer();
+    if (ContainerUtils::isAwgContainer(container) ||
+        container == DockerContainer::WireGuard) {
         return;
     }
 
@@ -339,7 +374,19 @@ void VpnConnection::addSitesRoutes(const QString &gw, amnezia::RouteMode mode)
 void VpnConnection::configureDnsSplitTunnel(const QString &gw, amnezia::RouteMode mode)
 {
 #ifdef AMNEZIA_DESKTOP
-    if (!m_appSettingsRepository) {
+    if (!m_appSettingsRepository || !m_serversRepository) {
+        return;
+    }
+
+    // Defense in depth: WG-family protocols manage their own split-tunnel DNS
+    // inside the daemon. Calling the legacy IpcServer path here would set the
+    // system resolver from the client side too, racing the daemon and breaking
+    // post-handshake DATA exchange.
+    const DockerContainer container =
+        m_serversRepository->server(m_serversRepository->defaultServerIndex())
+            .defaultContainer();
+    if (ContainerUtils::isAwgContainer(container) ||
+        container == DockerContainer::WireGuard) {
         return;
     }
 

@@ -10,6 +10,7 @@
 #include <QByteArray>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QLocalSocket>
 #include <QTimer>
 
@@ -61,7 +62,6 @@ void WireguardUtilsMacos::tunnelErrorOccurred(QProcess::ProcessError error) {
 }
 
 bool WireguardUtilsMacos::addInterface(const InterfaceConfig& config) {
-  Q_UNUSED(config);
   if (m_tunnel.state() != QProcess::NotRunning) {
     logger.warning() << "Unable to start: tunnel process already running";
     return false;
@@ -77,14 +77,24 @@ bool WireguardUtilsMacos::addInterface(const InterfaceConfig& config) {
   QFile::remove(wgNameFile);
   pe.insert("WG_TUN_NAME_FILE", wgNameFile);
   pe.insert("WG_UAPI_DIR", WG_RUNTIME_DIR);
-#ifdef MZ_DEBUG
+  // Always run the wireguard/amneziawg backend with debug logging — without
+  // it the backend is silent in release builds, which makes handshake
+  // failures undiagnosable.
   pe.insert("LOG_LEVEL", "debug");
-#endif
   m_tunnel.setProcessEnvironment(pe);
 
   QDir appPath(QCoreApplication::applicationDirPath());
+  const QString backendName = backendExecutableName(config);
+  const QString backendPath = appPath.filePath(backendName);
+  if (!QFileInfo::exists(backendPath)) {
+    logger.error() << "WireGuard backend executable is missing:" << backendPath;
+    QFile::remove(wgNameFile);
+    return false;
+  }
   QStringList wgArgs = {"-f", "utun"};
-  m_tunnel.start(appPath.filePath("amneziawg-go"), wgArgs);
+  logger.debug() << "Starting WireGuard backend" << backendPath
+                 << "for protocol" << config.m_protocolName;
+  m_tunnel.start(backendPath, wgArgs);
   if (!m_tunnel.waitForStarted(WG_TUN_PROC_TIMEOUT)) {
     logger.error() << "Unable to start tunnel process due to timeout";
     m_tunnel.kill();
@@ -448,6 +458,43 @@ int WireguardUtilsMacos::uapiErrno(const QString& reply) {
     }
   }
   return EINVAL;
+}
+
+QString WireguardUtilsMacos::backendExecutableName(
+    const InterfaceConfig& config) {
+  // Standard WireGuard container — always use stock wireguard-go.
+  if (config.m_protocolName == QStringLiteral("wireguard")) {
+    return QStringLiteral("wireguard-go");
+  }
+
+  // For AmneziaWG, only use amneziawg-go when at least one obfuscation
+  // parameter is actually configured. Running amneziawg-go without any
+  // obfuscation makes the first handshake succeed but breaks DATA-message
+  // parsing on the next rekey ("Received message with unknown type"); the
+  // server-side then keeps reinitiating handshakes that never complete.
+  // When the server endpoint is plain wireguard, falling back to wireguard-go
+  // gives a stable session.
+  const bool obfuscationConfigured =
+      !config.m_junkPacketCount.isEmpty()
+      || !config.m_junkPacketMinSize.isEmpty()
+      || !config.m_junkPacketMaxSize.isEmpty()
+      || !config.m_initPacketJunkSize.isEmpty()
+      || !config.m_responsePacketJunkSize.isEmpty()
+      || !config.m_cookieReplyPacketJunkSize.isEmpty()
+      || !config.m_transportPacketJunkSize.isEmpty()
+      || !config.m_initPacketMagicHeader.isEmpty()
+      || !config.m_responsePacketMagicHeader.isEmpty()
+      || !config.m_underloadPacketMagicHeader.isEmpty()
+      || !config.m_transportPacketMagicHeader.isEmpty()
+      || !config.m_specialJunk.isEmpty();
+
+  if (!obfuscationConfigured) {
+    QDir appPath(QCoreApplication::applicationDirPath());
+    if (QFileInfo::exists(appPath.filePath(QStringLiteral("wireguard-go")))) {
+      return QStringLiteral("wireguard-go");
+    }
+  }
+  return QStringLiteral("amneziawg-go");
 }
 
 QString WireguardUtilsMacos::waitForTunnelName(const QString& filename) {
