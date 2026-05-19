@@ -49,6 +49,11 @@ QJsonObject InterfaceConfig::toJson() const {
   }
   json.insert("excludedAddresses", jsExcludedAddresses);
 
+  QJsonArray jsSplitTunnelDnsRules;
+  for (const QString& i : m_splitTunnelDnsRules) {
+    jsSplitTunnelDnsRules.append(QJsonValue(i));
+  }
+  json.insert("splitTunnelDnsRules", jsSplitTunnelDnsRules);
 
   QJsonArray jsAllowedDnsServers;
   for (const QString& i : m_allowedDnsServers) {

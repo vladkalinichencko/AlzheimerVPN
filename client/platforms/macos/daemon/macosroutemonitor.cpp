@@ -514,7 +514,7 @@ bool MacosRouteMonitor::addExclusionRoute(const IPAddress& prefix) {
 
   if (m_exclusionRoutes.contains(prefix)) {
     logger.warning() << "Exclusion route already exists";
-    return false;
+    return true;
   }
   m_exclusionRoutes.append(prefix);
 

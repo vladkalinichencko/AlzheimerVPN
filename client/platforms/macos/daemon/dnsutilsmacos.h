@@ -26,10 +26,7 @@ class DnsUtilsMacos final : public DnsUtils {
   bool updateResolvers(const QString& ifname,
                        const QList<QHostAddress>& resolvers) override;
   bool restoreResolvers() override;
-  void configureSplitTunnelRules(const QStringList& rules);
-
-signals:
-  void splitTunnelHostResolved(const QString& host, const QStringList& ips);
+  void configureSplitTunnelRules(const QStringList& rules) override;
 
  private:
   void backupResolvers();

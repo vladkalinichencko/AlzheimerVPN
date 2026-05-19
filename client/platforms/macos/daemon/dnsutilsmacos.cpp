@@ -27,7 +27,7 @@ DnsUtilsMacos::DnsUtilsMacos(QObject* parent) : DnsUtils(parent) {
 
   logger.debug() << "DnsUtilsMacos created.";
   connect(&m_splitRouteObserver, &DnsSplitRouteObserver::hostResolved,
-          this, &DnsUtilsMacos::splitTunnelHostResolved);
+          this, &DnsUtils::splitTunnelHostResolved);
 }
 
 DnsUtilsMacos::~DnsUtilsMacos() {

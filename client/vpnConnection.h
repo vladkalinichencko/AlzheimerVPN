@@ -56,6 +56,7 @@ public slots:
     void connectToVpn(int serverIndex, DockerContainer container, const QJsonObject &vpnConfiguration);
     void reconnectToVpn();
     void disconnectFromVpn();
+    void refreshSiteSplitTunnelRoutes();
 
     void onKillSwitchModeChanged(bool enabled);
     void setConnectionDiagnostic(ConnectionHealth health);

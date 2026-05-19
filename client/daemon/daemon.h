@@ -6,6 +6,8 @@
 #define DAEMON_H
 
 #include <QDateTime>
+#include <QSet>
+#include <QStringList>
 #include <QTimer>
 
 #include "daemon/daemonerrors.h"
@@ -60,6 +62,13 @@ class Daemon : public QObject {
   bool addExclusionRoute(const IPAddress& address);
   bool delExclusionRoute(const IPAddress& address);
 
+  // Daemon-side split-tunnel DNS pipeline: keep host rules resolved to
+  // exclusion routes and refresh them periodically.
+  void configureSplitTunnelDnsRoutes(const InterfaceConfig& config);
+  void clearSplitTunnelDnsRoutes();
+  void refreshSplitTunnelDnsRoutes();
+  void onSplitTunnelHostResolved(const QString& host, const QStringList& ips);
+
  protected:
   virtual bool run(Op op, const InterfaceConfig& config) {
     Q_UNUSED(op);
@@ -88,6 +97,18 @@ class Daemon : public QObject {
   QMap<InterfaceConfig::HopType, ConnectionState> m_connections;
   QHash<IPAddress, int> m_excludedAddrSet;
   QTimer m_handshakeTimer;
+
+  // Hosts (exact + wildcard normalized) we re-resolve periodically while
+  // the tunnel is up.
+  QStringList m_splitTunnelDnsResolveHosts;
+  // IPs we already added exclusion routes for via this mechanism, so we can
+  // tear them down on disconnect or rule change without touching the rest.
+  QSet<IPAddress> m_splitTunnelDnsRoutes;
+  // Generation counter — incremented on every rule reconfigure or shutdown,
+  // so in-flight async resolves can detect they are obsolete and stop.
+  int m_splitTunnelDnsGeneration = 0;
+  bool m_splitTunnelDnsKillSwitchEnabled = false;
+  QTimer m_splitTunnelDnsRefreshTimer;
 };
 
 #endif  // DAEMON_H

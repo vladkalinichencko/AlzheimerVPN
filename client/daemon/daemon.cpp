@@ -5,6 +5,8 @@
 #include "daemon.h"
 
 #include <QCoreApplication>
+#include <QHostAddress>
+#include <QHostInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -12,6 +14,8 @@
 #include <QMetaEnum>
 #include <QTimer>
 
+#include "core/utils/splitTunnelRule.h"
+#include "killswitch.h"
 #include "leakdetector.h"
 #include "logger.h"
 
@@ -36,6 +40,12 @@ Daemon::Daemon(QObject* parent) : QObject(parent) {
 
   m_handshakeTimer.setSingleShot(true);
   connect(&m_handshakeTimer, &QTimer::timeout, this, &Daemon::checkHandshake);
+
+  // Re-resolve split-tunnel DNS rules every 60 seconds while connected so
+  // exclusion routes follow IP changes for things like CDN-fronted sites.
+  m_splitTunnelDnsRefreshTimer.setInterval(60000);
+  connect(&m_splitTunnelDnsRefreshTimer, &QTimer::timeout, this,
+          &Daemon::refreshSplitTunnelDnsRoutes);
 }
 
 Daemon::~Daemon() {
@@ -82,6 +92,7 @@ bool Daemon::activate(const InterfaceConfig& config) {
         return false;
       }
 
+      configureSplitTunnelDnsRoutes(config);
       if (!maybeUpdateResolvers(config)) {
         return false;
       }
@@ -135,6 +146,8 @@ bool Daemon::activate(const InterfaceConfig& config) {
   for (const QString& i : config.m_excludedAddresses) {
     addExclusionRoute(IPAddress(i));
   }
+
+  configureSplitTunnelDnsRoutes(config);
 
   // Add the peer to this interface.
   if (!wgutils()->updatePeer(config)) {
@@ -383,6 +396,10 @@ bool Daemon::parseConfig(const QJsonObject& obj, InterfaceConfig& config) {
   if (!parseStringList(obj, "excludedAddresses", config.m_excludedAddresses)) {
     return false;
   }
+  if (!parseStringList(obj, "splitTunnelDnsRules",
+                       config.m_splitTunnelDnsRules)) {
+    return false;
+  }
   if (!parseStringList(obj, "vpnDisabledApps", config.m_vpnDisabledApps)) {
     return false;
   }
@@ -459,6 +476,17 @@ bool Daemon::deactivate(bool emitSignals) {
 
   if (emitSignals) {
     emit disconnected();
+  }
+
+  // Tear down the daemon-side split-tunnel DNS pipeline before restoring
+  // resolvers so its routes are removed and in-flight resolves are obsoleted.
+  m_splitTunnelDnsKillSwitchEnabled = false;
+  ++m_splitTunnelDnsGeneration;
+  clearSplitTunnelDnsRoutes();
+  m_splitTunnelDnsResolveHosts.clear();
+  m_splitTunnelDnsRefreshTimer.stop();
+  if (dnsutils()) {
+    dnsutils()->configureSplitTunnelRules(QStringList());
   }
 
   // Cleanup DNS
@@ -621,3 +649,92 @@ void Daemon::checkHandshake() {
     m_handshakeTimer.start(HANDSHAKE_POLL_MSEC);
   }
 }
+
+void Daemon::configureSplitTunnelDnsRoutes(const InterfaceConfig& config) {
+  if (!dnsutils()) {
+    return;
+  }
+
+  ++m_splitTunnelDnsGeneration;
+  m_splitTunnelDnsKillSwitchEnabled = config.m_killSwitchEnabled;
+  clearSplitTunnelDnsRoutes();
+  dnsutils()->configureSplitTunnelRules(QStringList());
+
+  m_splitTunnelDnsResolveHosts.clear();
+  for (const QString& ruleText : config.m_splitTunnelDnsRules) {
+    const amnezia::SplitTunnelRule rule =
+        amnezia::SplitTunnelRule::fromText(ruleText);
+    if (rule.isValid() &&
+        rule.type() == amnezia::SplitTunnelRule::Type::ExactHost) {
+      m_splitTunnelDnsResolveHosts.append(rule.normalizedText());
+    }
+  }
+  m_splitTunnelDnsResolveHosts.removeDuplicates();
+
+  if (m_splitTunnelDnsResolveHosts.isEmpty()) {
+    m_splitTunnelDnsRefreshTimer.stop();
+    return;
+  }
+
+  QTimer::singleShot(0, this, &Daemon::refreshSplitTunnelDnsRoutes);
+  m_splitTunnelDnsRefreshTimer.start();
+}
+
+void Daemon::clearSplitTunnelDnsRoutes() {
+  for (const IPAddress& route : m_splitTunnelDnsRoutes) {
+    if (m_excludedAddrSet.contains(route) && !delExclusionRoute(route)) {
+      logger.warning() << "Failed to delete split-tunnel DNS route"
+                       << route.toString();
+    }
+  }
+  m_splitTunnelDnsRoutes.clear();
+}
+
+void Daemon::refreshSplitTunnelDnsRoutes() {
+  const int generation = m_splitTunnelDnsGeneration;
+  for (const QString& host : m_splitTunnelDnsResolveHosts) {
+    QHostInfo::lookupHost(host, this, [this, host, generation](const QHostInfo& info) {
+      if (generation != m_splitTunnelDnsGeneration) {
+        return;
+      }
+      QStringList ips;
+      for (const QHostAddress& address : info.addresses()) {
+        if (address.protocol() == QAbstractSocket::IPv4Protocol) {
+          ips.append(address.toString());
+        }
+      }
+      ips.removeDuplicates();
+      if (!ips.isEmpty()) {
+        onSplitTunnelHostResolved(host, ips);
+      } else {
+        logger.warning() << "Split-tunnel DNS refresh failed for" << host
+                         << info.errorString();
+      }
+    });
+  }
+}
+
+void Daemon::onSplitTunnelHostResolved(const QString& host,
+                                       const QStringList& ips) {
+  logger.debug() << "Split tunnel DNS resolved" << host << ips;
+
+  QStringList routedIps;
+  for (const QString& ip : ips) {
+    const IPAddress route(ip);
+    if (m_splitTunnelDnsRoutes.contains(route)) {
+      continue;
+    }
+    if (addExclusionRoute(route)) {
+      m_splitTunnelDnsRoutes.insert(route);
+      routedIps.append(ip);
+    } else {
+      logger.warning() << "Failed to add split-tunnel exclusion route"
+                       << host << ip;
+    }
+  }
+
+  if (m_splitTunnelDnsKillSwitchEnabled && !routedIps.isEmpty()) {
+    KillSwitch::instance()->addAllowedRange(routedIps);
+  }
+}
+

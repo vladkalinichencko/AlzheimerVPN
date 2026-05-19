@@ -41,6 +41,9 @@ class InterfaceConfig {
   int m_deviceMTU = 1420;
   QList<IPAddress> m_allowedIPAddressRanges;
   QStringList m_excludedAddresses;
+  // Hostname / wildcard rules for daemon-side DNS observation and
+  // exclusion-route refresh (drives Daemon::configureSplitTunnelDnsRoutes).
+  QStringList m_splitTunnelDnsRules;
   QStringList m_vpnDisabledApps;
   QStringList m_allowedDnsServers;
   bool m_killSwitchEnabled;

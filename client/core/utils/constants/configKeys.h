@@ -94,6 +94,7 @@ namespace amnezia
         constexpr QLatin1String socks5proxy("socks5proxy");
 
         constexpr QLatin1String splitTunnelSites("splitTunnelSites");
+        constexpr QLatin1String splitTunnelDnsRules("splitTunnelDnsRules");
         constexpr QLatin1String splitTunnelType("splitTunnelType");
 
         constexpr QLatin1String splitTunnelApps("splitTunnelApps");

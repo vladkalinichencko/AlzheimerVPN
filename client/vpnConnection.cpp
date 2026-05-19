@@ -453,6 +453,22 @@ bool VpnConnection::addSplitTunnelRoutes(const QString &gw, amnezia::RouteMode m
 #endif
 }
 
+void VpnConnection::refreshSiteSplitTunnelRoutes()
+{
+    if (m_connectionState != Vpn::ConnectionState::Connected) {
+        return;
+    }
+    if (!m_appSettingsRepository) {
+        return;
+    }
+    const amnezia::RouteMode mode = m_appSettingsRepository->routeMode();
+    const QString gw = (mode == amnezia::RouteMode::VpnAllExceptSites)
+        ? (m_vpnProtocol ? m_vpnProtocol->routeGateway() : QString())
+        : (m_vpnProtocol ? m_vpnProtocol->vpnGateway() : QString());
+    configureDnsSplitTunnel(gw, mode);
+    addSitesRoutes(gw, mode);
+}
+
 QSharedPointer<VpnProtocol> VpnConnection::vpnProtocol() const
 {
     return m_vpnProtocol;
@@ -642,28 +658,50 @@ void VpnConnection::appendSplitTunnelingConfig()
 
     amnezia::RouteMode routeMode = amnezia::RouteMode::VpnAllSites;
     QJsonArray sitesJsonArray;
+    QJsonArray dnsRulesJsonArray;
     if (m_appSettingsRepository->isSitesSplitTunnelingEnabled()) {
         routeMode = m_appSettingsRepository->routeMode();
 
         if (allowSiteBasedSplitTunneling) {
             QStringList sites;
+            QStringList dnsRules;
             bool hasDynamicHostRules = false;
             const QVariantMap &m = m_appSettingsRepository->vpnSites(routeMode);
             for (auto i = m.constBegin(); i != m.constEnd(); ++i) {
-                if (NetworkUtilities::checkIpSubnetFormat(i.key())) {
-                    sites.append(i.key());
-                } else if (NetworkUtilities::checkIpSubnetFormat(i.value().toString())) {
+                const QString &ruleText = i.key();
+                if (NetworkUtilities::checkIpSubnetFormat(ruleText)) {
+                    sites.append(ruleText);
+                    continue;
+                }
+                if (NetworkUtilities::checkIpSubnetFormat(i.value().toString())) {
                     sites.append(i.value().toString());
-                } else if (amnezia::SplitTunnelRule::fromText(i.key()).isDynamicHostRule()) {
+                }
+                const amnezia::SplitTunnelRule rule = amnezia::SplitTunnelRule::fromText(ruleText);
+                if (!rule.isValid()) {
+                    continue;
+                }
+                if (rule.isDynamicHostRule()) {
                     hasDynamicHostRules = true;
+                }
+                // Hostname / wildcard rules are forwarded to the daemon so it
+                // can resolve them periodically and add exclusion routes for
+                // every IPv4 the host currently maps to. Without this, only
+                // pre-resolved IP entries from the settings store reach the
+                // daemon, and a rule like "kinopoisk.ru" never gets routed.
+                if (rule.type() != amnezia::SplitTunnelRule::Type::IpSubnet) {
+                    dnsRules.append(rule.normalizedText());
                 }
             }
             sites.removeDuplicates();
+            dnsRules.removeDuplicates();
             for (const auto &site : sites) {
                 sitesJsonArray.append(site);
             }
+            for (const auto &rule : dnsRules) {
+                dnsRulesJsonArray.append(rule);
+            }
 
-            if (sitesJsonArray.isEmpty() && !hasDynamicHostRules) {
+            if (sitesJsonArray.isEmpty() && !hasDynamicHostRules && dnsRulesJsonArray.isEmpty()) {
                 routeMode = amnezia::RouteMode::VpnAllSites;
             } else if (routeMode == amnezia::RouteMode::VpnOnlyForwardSites) {
                 // Allow traffic to Amnezia DNS
@@ -675,6 +713,7 @@ void VpnConnection::appendSplitTunnelingConfig()
 
     m_vpnConfiguration.insert(configKey::splitTunnelType, routeMode);
     m_vpnConfiguration.insert(configKey::splitTunnelSites, sitesJsonArray);
+    m_vpnConfiguration.insert(configKey::splitTunnelDnsRules, dnsRulesJsonArray);
 
     amnezia::AppsRouteMode appsRouteMode = amnezia::AppsRouteMode::VpnAllApps;
     QJsonArray appsJsonArray;

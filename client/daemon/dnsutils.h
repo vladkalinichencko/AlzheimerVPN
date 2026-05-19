@@ -6,9 +6,9 @@
 #define DNSUTILS_H
 
 #include <QHostAddress>
+#include <QObject>
 #include <QString>
-
-#include "dnsutils.h"
+#include <QStringList>
 
 class DnsUtils : public QObject {
   Q_OBJECT
@@ -29,6 +29,13 @@ class DnsUtils : public QObject {
     qFatal("Have you forgotten to implement DnsUtils::restoreResolvers?");
     return false;
   }
+
+  virtual void configureSplitTunnelRules(const QStringList& rules) {
+    Q_UNUSED(rules);
+  }
+
+ signals:
+  void splitTunnelHostResolved(const QString& host, const QStringList& ips);
 };
 
 #endif  // DNSUTILS_H
