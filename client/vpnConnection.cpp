@@ -118,7 +118,9 @@ void VpnConnection::onConnectionStateChanged(Vpn::ConnectionState state)
         stopConnectingWatchdog();
         stopConnectivityProbe();
         stopConnectedHealthCheck();
-        markLastError(ErrorCode::NoError);
+        if (!connectionHealthProblem(m_connectionHealth)) {
+            markLastError(ErrorCode::NoError);
+        }
         setConnectionHealth(ConnectionHealth::Idle);
         break;
     case Vpn::ConnectionState::Error:
@@ -491,11 +493,18 @@ ErrorCode VpnConnection::lastError() const
         return m_lastError;
     }
 
-    if (m_vpnProtocol.isNull()) {
-        return ErrorCode::NoError;
+    const ErrorCode protocolError = m_vpnProtocol.isNull()
+        ? ErrorCode::NoError
+        : m_vpnProtocol.data()->lastError();
+    if (protocolError != ErrorCode::NoError) {
+        return protocolError;
     }
 
-    return m_vpnProtocol.data()->lastError();
+    if (m_connectionState == Vpn::ConnectionState::Error) {
+        return ErrorCode::UnknownError;
+    }
+
+    return ErrorCode::NoError;
 }
 
 Vpn::ConnectionState VpnConnection::connectionState() const
@@ -784,10 +793,12 @@ void VpnConnection::reconnectToVpn() {
 
     qDebug() << "Reconnect triggered. Reconnecting to the server";
 
-    setConnectionState(Vpn::ConnectionState::Reconnecting);
+    m_silentReconnectInProgress = true;
+    setConnectionHealth(ConnectionHealth::Recovering);
 
     m_vpnProtocol->stop();
     if (ErrorCode err = m_vpnProtocol->start(); err != ErrorCode::NoError) {
+        m_silentReconnectInProgress = false;
         markLastError(err);
         setConnectionHealth(ConnectionHealth::ProtocolStartFailed);
         setConnectionState(Vpn::ConnectionState::Error);
@@ -837,6 +848,23 @@ void VpnConnection::disconnectFromVpn()
 void VpnConnection::setConnectionState(Vpn::ConnectionState state) {
     const Vpn::ConnectionState previousState = m_connectionState;
 
+    if (m_silentReconnectInProgress &&
+        state == Vpn::ConnectionState::Disconnected &&
+        previousState == Vpn::ConnectionState::Connected) {
+        return;
+    }
+
+    if (state == Vpn::ConnectionState::Connected) {
+        m_silentReconnectInProgress = false;
+    }
+
+    if (state == Vpn::ConnectionState::Error &&
+        m_lastError == ErrorCode::NoError &&
+        (m_vpnProtocol.isNull() ||
+         m_vpnProtocol.data()->lastError() == ErrorCode::NoError)) {
+        markLastError(ErrorCode::UnknownError);
+    }
+
     if (state == Vpn::Disconnected && previousState == Vpn::Reconnecting) {
         m_connectionState = state;
         onConnectionStateChanged(state);
@@ -856,8 +884,9 @@ void VpnConnection::onProtocolError(ErrorCode error)
         error == ErrorCode::VpnBackendFailure) {
         setConnectionHealth(ConnectionHealth::LocalServiceUnavailable);
     }
-    if (m_connectionState == Vpn::ConnectionState::Connecting ||
-        m_connectionState == Vpn::ConnectionState::Reconnecting) {
+    if (m_connectionState != Vpn::ConnectionState::Disconnected &&
+        m_connectionState != Vpn::ConnectionState::Disconnecting) {
+        m_silentReconnectInProgress = false;
         setConnectionState(Vpn::ConnectionState::Error);
     }
     emit vpnProtocolError(error);
@@ -931,11 +960,6 @@ void VpnConnection::onConnectivityProbeFailed()
     stopConnectivityProbe();
     markLastError(ErrorCode::VpnNoTrafficError);
     setConnectionHealth(ConnectionHealth::NoTraffic);
-    if (!m_noTrafficRecoveryAttempted && !m_vpnProtocol.isNull()) {
-        m_noTrafficRecoveryAttempted = true;
-        setConnectionHealth(ConnectionHealth::Recovering);
-        QTimer::singleShot(0, this, &VpnConnection::reconnectToVpn);
-    }
 }
 
 void VpnConnection::setConnectionHealth(ConnectionHealth health)
