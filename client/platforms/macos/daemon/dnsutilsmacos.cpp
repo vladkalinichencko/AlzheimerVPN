@@ -23,6 +23,16 @@ DnsUtilsMacos::DnsUtilsMacos(QObject* parent) : DnsUtils(parent) {
                                    CFSTR("amneziavpn"), nullptr, nullptr);
   if (m_scStore == nullptr) {
     logger.error() << "Failed to create system configuration store ref";
+  } else {
+    // Startup sweep: if the previous daemon process crashed or was force-killed
+    // mid-session, our `127.0.0.1 + DomainName=lan` overrides may still be sitting
+    // in SCDynamicStore for every network service. In-memory m_prevServices is
+    // empty at this point (fresh process), so the regular restoreResolvers path
+    // wouldn't see them. Without this sweep the user sits with system DNS pointed
+    // at loopback (where nothing is listening, because our DnsSplitRouteObserver
+    // hasn't started yet) and observes "no internet without VPN until reboot".
+    // Running the sweep here closes that window the moment the daemon starts.
+    removeStaleLocalResolverOverrides();
   }
 
   logger.debug() << "DnsUtilsMacos created.";
@@ -37,6 +47,10 @@ DnsUtilsMacos::~DnsUtilsMacos() {
 }
 
 static QString cfParseString(CFTypeRef ref) {
+  if (!ref) {
+    return QString();
+  }
+
   if (CFGetTypeID(ref) != CFStringGetTypeID()) {
     return QString();
   }
@@ -60,6 +74,10 @@ static QString cfParseString(CFTypeRef ref) {
 }
 
 static QStringList cfParseStringList(CFTypeRef ref) {
+  if (!ref) {
+    return QStringList();
+  }
+
   if (CFGetTypeID(ref) != CFArrayGetTypeID()) {
     return QStringList();
   }
@@ -109,6 +127,19 @@ static void cfDictSetStringList(CFMutableDictionaryRef dict, CFStringRef name,
   CFRelease(array);
 }
 
+static bool isAmneziaLocalResolverConfig(CFTypeRef ref) {
+  if (!ref || CFGetTypeID(ref) != CFDictionaryGetTypeID()) {
+    return false;
+  }
+
+  CFDictionaryRef config = (CFDictionaryRef)ref;
+  CFTypeRef servers = CFDictionaryGetValue(config, kSCPropNetDNSServerAddresses);
+  CFTypeRef domain = CFDictionaryGetValue(config, kSCPropNetDNSDomainName);
+
+  return cfParseStringList(servers) == QStringList{QStringLiteral("127.0.0.1")} &&
+         cfParseString(domain) == QStringLiteral("lan");
+}
+
 bool DnsUtilsMacos::updateResolvers(const QString& ifname,
                                     const QList<QHostAddress>& resolvers) {
   Q_UNUSED(ifname);
@@ -119,9 +150,13 @@ bool DnsUtilsMacos::updateResolvers(const QString& ifname,
   }
 
   if (m_splitRouteObserver.start(resolvers)) {
-    resolverList = QStringList{ QStringLiteral("127.0.0.1") };
+    logger.debug() << "DNS split route observer enabled with upstream resolvers"
+                   << resolverList;
+    resolverList = QStringList{QStringLiteral("127.0.0.1")};
   } else {
     m_splitRouteObserver.stop();
+    logger.debug() << "DNS split route observer disabled; using resolvers"
+                   << resolverList;
   }
 
   // Get the list of current network services.
@@ -193,10 +228,15 @@ bool DnsUtilsMacos::restoreResolvers() {
   }
 
   m_prevServices.clear();
+  removeStaleLocalResolverOverrides();
   return true;
 }
 
 void DnsUtilsMacos::backupService(const QString& uuid) {
+  if (m_prevServices.contains(uuid)) {
+    return;
+  }
+
   DnsBackup backup;
   CFStringRef path = CFStringCreateWithFormat(
       kCFAllocatorSystemDefault, nullptr,
@@ -232,6 +272,33 @@ void DnsUtilsMacos::backupService(const QString& uuid) {
   }
 
   m_prevServices[uuid] = backup;
+}
+
+void DnsUtilsMacos::removeStaleLocalResolverOverrides() {
+  CFArrayRef dnsServices = SCDynamicStoreCopyKeyList(
+      m_scStore, CFSTR("(Setup|State):/Network/Service/[0-9A-F-]+/DNS"));
+  if (dnsServices == nullptr) {
+    return;
+  }
+  auto serviceGuard = qScopeGuard([&] { CFRelease(dnsServices); });
+
+  for (CFIndex i = 0; i < CFArrayGetCount(dnsServices); i++) {
+    CFStringRef path = (CFStringRef)CFArrayGetValueAtIndex(dnsServices, i);
+    CFTypeRef config = SCDynamicStoreCopyValue(m_scStore, path);
+    auto configGuard = qScopeGuard([&] {
+      if (config) {
+        CFRelease(config);
+      }
+    });
+
+    if (!isAmneziaLocalResolverConfig(config)) {
+      continue;
+    }
+
+    logger.debug() << "Removing stale local DNS override for"
+                   << cfParseString(path);
+    SCDynamicStoreRemoveValue(m_scStore, path);
+  }
 }
 
 void DnsUtilsMacos::configureSplitTunnelRules(const QStringList& rules)

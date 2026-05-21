@@ -377,6 +377,19 @@ if(WIN32)
 else()
     find_package(awg-go REQUIRED)
     list(APPEND CONAN_EXECS $<TARGET_FILE:amnezia::awg-go>)
+    if(APPLE)
+        find_program(WIREGUARD_GO_EXECUTABLE
+            NAMES wireguard-go
+            PATHS
+                "/Applications/AmneziaVPN.app/Contents/MacOS"
+                "/Applications/AlzheimerVPN.app/Contents/MacOS"
+        )
+        if(WIREGUARD_GO_EXECUTABLE)
+            list(APPEND CONAN_EXECS ${WIREGUARD_GO_EXECUTABLE})
+        else()
+            message(WARNING "wireguard-go was not found; plain WireGuard backend will be missing from the app bundle")
+        endif()
+    endif()
 endif()
 
 find_package(openvpn REQUIRED)

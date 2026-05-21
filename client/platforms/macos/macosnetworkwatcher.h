@@ -42,7 +42,7 @@ class MacOSNetworkWatcher final : public IOSNetworkWatcher {
 
   void start() override;
 
-  void checkInterface();
+  bool checkInterface();
 
   void controllerStateChanged();
 

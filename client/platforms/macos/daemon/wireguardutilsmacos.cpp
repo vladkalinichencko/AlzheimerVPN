@@ -472,37 +472,8 @@ int WireguardUtilsMacos::uapiErrno(const QString& reply) {
 
 QString WireguardUtilsMacos::backendExecutableName(
     const InterfaceConfig& config) {
-  // Standard WireGuard container — always use stock wireguard-go.
   if (config.m_protocolName == QStringLiteral("wireguard")) {
     return QStringLiteral("wireguard-go");
-  }
-
-  // For AmneziaWG, only use amneziawg-go when at least one obfuscation
-  // parameter is actually configured. Running amneziawg-go without any
-  // obfuscation makes the first handshake succeed but breaks DATA-message
-  // parsing on the next rekey ("Received message with unknown type"); the
-  // server-side then keeps reinitiating handshakes that never complete.
-  // When the server endpoint is plain wireguard, falling back to wireguard-go
-  // gives a stable session.
-  const bool obfuscationConfigured =
-      !config.m_junkPacketCount.isEmpty()
-      || !config.m_junkPacketMinSize.isEmpty()
-      || !config.m_junkPacketMaxSize.isEmpty()
-      || !config.m_initPacketJunkSize.isEmpty()
-      || !config.m_responsePacketJunkSize.isEmpty()
-      || !config.m_cookieReplyPacketJunkSize.isEmpty()
-      || !config.m_transportPacketJunkSize.isEmpty()
-      || !config.m_initPacketMagicHeader.isEmpty()
-      || !config.m_responsePacketMagicHeader.isEmpty()
-      || !config.m_underloadPacketMagicHeader.isEmpty()
-      || !config.m_transportPacketMagicHeader.isEmpty()
-      || !config.m_specialJunk.isEmpty();
-
-  if (!obfuscationConfigured) {
-    QDir appPath(QCoreApplication::applicationDirPath());
-    if (QFileInfo::exists(appPath.filePath(QStringLiteral("wireguard-go")))) {
-      return QStringLiteral("wireguard-go");
-    }
   }
   return QStringLiteral("amneziawg-go");
 }

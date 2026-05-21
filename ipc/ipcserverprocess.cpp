@@ -11,15 +11,59 @@ IpcServerProcess::IpcServerProcess(QObject *parent) :
     connect(m_process.data(), &QProcess::errorOccurred, this, &IpcServerProcess::errorOccurred);
     connect(m_process.data(), QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, &IpcServerProcess::finished);
     connect(m_process.data(), &QProcess::readyRead, this, &IpcServerProcess::readyRead);
-    connect(m_process.data(), &QProcess::readyReadStandardError, this, &IpcServerProcess::readyReadStandardError);
-    connect(m_process.data(), &QProcess::readyReadStandardOutput, this, &IpcServerProcess::readyReadStandardOutput);
+    connect(m_process.data(), &QProcess::readyReadStandardError, this, [this]() {
+        const auto previousChannel = m_process->readChannel();
+        m_process->setReadChannel(QProcess::StandardError);
+        const QByteArray chunk = m_process->peek(m_process->bytesAvailable());
+        m_process->setReadChannel(previousChannel);
+        appendProcessOutput(m_stderrTail, chunk);
+        emit readyReadStandardError();
+    });
+    connect(m_process.data(), &QProcess::readyReadStandardOutput, this, [this]() {
+        const auto previousChannel = m_process->readChannel();
+        m_process->setReadChannel(QProcess::StandardOutput);
+        const QByteArray chunk = m_process->peek(m_process->bytesAvailable());
+        m_process->setReadChannel(previousChannel);
+        appendProcessOutput(m_stdoutTail, chunk);
+        emit readyReadStandardOutput();
+    });
     connect(m_process.data(), &QProcess::started, this, &IpcServerProcess::started);
     connect(m_process.data(), &QProcess::stateChanged, this, &IpcServerProcess::stateChanged);
 
-    connect(m_process.data(), &QProcess::errorOccurred, [&](QProcess::ProcessError error){
-        qDebug() << "IpcServerProcess errorOccurred " << error;
+    connect(m_process.data(), &QProcess::errorOccurred, [this](QProcess::ProcessError error){
+        logProcessSnapshot(QStringLiteral("errorOccurred"), error);
+    });
+    connect(m_process.data(), QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [this](int exitCode, QProcess::ExitStatus exitStatus) {
+        qWarning().noquote()
+            << "IpcServerProcess finished"
+            << "program=" + m_process->program()
+            << "exit_code=" + QString::number(exitCode)
+            << "exit_status=" + QString::number(static_cast<int>(exitStatus))
+            << "stderr_tail=" + QString::fromUtf8(m_stderrTail).simplified()
+            << "stdout_tail=" + QString::fromUtf8(m_stdoutTail).simplified();
     });
 
+}
+
+void IpcServerProcess::appendProcessOutput(QByteArray &buffer, const QByteArray &chunk)
+{
+    buffer.append(chunk);
+    constexpr qsizetype maxTailBytes = 4096;
+    if (buffer.size() > maxTailBytes) {
+        buffer = buffer.right(maxTailBytes);
+    }
+}
+
+void IpcServerProcess::logProcessSnapshot(const QString &event, QProcess::ProcessError error)
+{
+    qWarning().noquote()
+        << "IpcServerProcess" << event
+        << "program=" + m_process->program()
+        << "error=" + QString::number(static_cast<int>(error))
+        << "state=" + QString::number(static_cast<int>(m_process->state()))
+        << "stderr_tail=" + QString::fromUtf8(m_stderrTail).simplified()
+        << "stdout_tail=" + QString::fromUtf8(m_stdoutTail).simplified();
 }
 
 IpcServerProcess::~IpcServerProcess()

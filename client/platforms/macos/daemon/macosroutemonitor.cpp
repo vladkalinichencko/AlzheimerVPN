@@ -521,13 +521,21 @@ bool MacosRouteMonitor::addExclusionRoute(const IPAddress& prefix) {
   // If the default route is known, then updte the routing table immediately.
   if ((prefix.address().protocol() == QAbstractSocket::IPv4Protocol) &&
       (m_defaultIfindexIpv4 != 0) && !m_defaultGatewayIpv4.isEmpty()) {
-    return rtmSendRoute(RTM_ADD, prefix, m_defaultIfindexIpv4,
-                        m_defaultGatewayIpv4.constData());
+    const bool ok = rtmSendRoute(RTM_ADD, prefix, m_defaultIfindexIpv4,
+                                 m_defaultGatewayIpv4.constData());
+    if (!ok) {
+      m_exclusionRoutes.removeAll(prefix);
+    }
+    return ok;
   }
   if ((prefix.address().protocol() == QAbstractSocket::IPv6Protocol) &&
       (m_defaultIfindexIpv6 != 0) && !m_defaultGatewayIpv6.isEmpty()) {
-    return rtmSendRoute(RTM_ADD, prefix, m_defaultIfindexIpv6,
-                        m_defaultGatewayIpv6.constData());
+    const bool ok = rtmSendRoute(RTM_ADD, prefix, m_defaultIfindexIpv6,
+                                 m_defaultGatewayIpv6.constData());
+    if (!ok) {
+      m_exclusionRoutes.removeAll(prefix);
+    }
+    return ok;
   }
 
   // Otherwise, the default route isn't known yet. Do nothing.

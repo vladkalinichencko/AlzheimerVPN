@@ -46,9 +46,9 @@ public:
     }
 
 protected:
-    void connectConnectivityProbe(QTcpSocket *socket) override
+    void connectConnectivityProbe() override
     {
-        Q_UNUSED(socket);
+        // No-op: tests drive onConnectivityProbeSucceeded/Failed directly.
     }
 };
 
@@ -177,7 +177,7 @@ private slots:
         QCOMPARE(connection.lastError(), ErrorCode::NoError);
     }
 
-    void activeProbeFailureStartsRecoveryWhenProtocolCanReconnect()
+    void activeProbeFailureReportsNoTrafficWithoutUiReconnect()
     {
         TestableVpnConnection connection;
         connection.setProtocol(new FakeNonPollingProtocol());
@@ -185,7 +185,7 @@ private slots:
         connection.setConnectionState(Vpn::ConnectionState::Connected);
         connection.onConnectivityProbeFailed();
 
-        QCOMPARE(connection.connectionHealth(), ConnectionHealth::Recovering);
+        QCOMPARE(connection.connectionHealth(), ConnectionHealth::NoTraffic);
         QCOMPARE(connection.lastError(), ErrorCode::VpnNoTrafficError);
     }
 
@@ -217,7 +217,7 @@ private slots:
         QCOMPARE(connection.lastError(), ErrorCode::NoError);
     }
 
-    void healthyConnectionStartsRecoveryWhenDataPathFails()
+    void healthyConnectionReportsNoTrafficWhenDataPathFails()
     {
         TestableVpnConnection connection;
         connection.setProtocol(new FakePollingProtocol());
@@ -227,8 +227,17 @@ private slots:
         connection.checkConnectedHealth();
         connection.onConnectivityProbeFailed();
 
-        QCOMPARE(connection.connectionHealth(), ConnectionHealth::Recovering);
+        QCOMPARE(connection.connectionHealth(), ConnectionHealth::NoTraffic);
         QCOMPARE(connection.lastError(), ErrorCode::VpnNoTrafficError);
+    }
+
+    void errorStateNeverReportsNoError()
+    {
+        TestableVpnConnection connection;
+
+        connection.setConnectionState(Vpn::ConnectionState::Error);
+
+        QCOMPARE(connection.lastError(), ErrorCode::UnknownError);
     }
 };
 

@@ -18,13 +18,24 @@ RouterMac::RouterMac()
     m_dnsUtil = new DnsUtilsMacos(this);
     connect(m_dnsUtil, &DnsUtilsMacos::splitTunnelHostResolved, this,
             [this](const QString &host, const QStringList &ips) {
-                Q_UNUSED(host);
                 if (m_dnsSplitTunnelGateway.isEmpty() || ips.isEmpty()) {
                     return;
                 }
-                routeAddList(m_dnsSplitTunnelGateway, ips);
+                QStringList newIps;
+                for (const QString &ip : ips) {
+                    if (m_dnsSplitTunnelIps.contains(ip)) {
+                        continue;
+                    }
+                    m_dnsSplitTunnelIps.insert(ip);
+                    newIps.append(ip);
+                }
+                if (newIps.isEmpty()) {
+                    return;
+                }
+                qInfo() << "RouterMac::splitTunnelHostResolved host=" << host << "new_ips=" << newIps;
+                routeAddList(m_dnsSplitTunnelGateway, newIps);
                 if (m_dnsSplitTunnelKillSwitchEnabled) {
-                    KillSwitch::instance()->addAllowedRange(ips);
+                    KillSwitch::instance()->addAllowedRange(newIps);
                 }
             });
 }
@@ -181,6 +192,9 @@ bool RouterMac::restoreResolvers() {
 
 bool RouterMac::configureDnsSplitTunnel(const QStringList &rules, const QString &gw, bool killSwitchEnabled)
 {
+    if (m_dnsSplitTunnelGateway != gw || rules.isEmpty()) {
+        m_dnsSplitTunnelIps.clear();
+    }
     m_dnsSplitTunnelGateway = gw;
     m_dnsSplitTunnelKillSwitchEnabled = killSwitchEnabled;
     m_dnsUtil->configureSplitTunnelRules(rules);
@@ -279,8 +293,19 @@ bool RouterMac::routeDeleteXray(const QString& ifname, const QString& gateway)
 
 bool RouterMac::deleteTun(const QString &dev)
 {
-    qDebug().noquote() << "deleteTun start";
+    qDebug().noquote() << "deleteTun start" << dev;
 
+    // On macOS the utun device is owned by the process that opened it (tun2socks).
+    // The kernel only frees the device when that process exits. If a previous
+    // tun2socks is still alive (e.g. the GUI crashed/restarted without a clean
+    // teardown), the next xray connect spawns a new tun2socks that fails with
+    // "create tun: resource busy". Kill any lingering tun2socks bound to this dev.
+    QProcess pkill;
+    pkill.setProcessChannelMode(QProcess::MergedChannels);
+    pkill.start("/usr/bin/pkill", { "-f", QStringLiteral("tun2socks.*tun://%1\\b").arg(dev) });
+    pkill.waitForFinished(2000);
+    qDebug().noquote() << "deleteTun pkill exit=" << pkill.exitCode()
+                       << "out=" << QString::fromUtf8(pkill.readAll()).trimmed();
     return true;
 }
 

@@ -243,11 +243,13 @@ void LocalSocketController::activate(const QJsonObject &rawConfig) {
   json.insert("allowedIPAddressRanges", jsAllowedIPAddesses);
 
   QJsonArray jsExcludedAddresses;
-  jsExcludedAddresses.append(wgConfig.value(amnezia::configKey::hostName));
+  jsExcludedAddresses.append(wgConfig.value(amnezia::configKey::hostName).toString().trimmed());
   if (splitTunnelType == 2) {
     for (auto v : splitTunnelSites) {
-          QString ipRange = v.toString();
-          jsExcludedAddresses.append(ipRange);
+          QString ipRange = v.toString().trimmed();
+          if (!ipRange.isEmpty()) {
+              jsExcludedAddresses.append(ipRange);
+          }
       }
   }
 

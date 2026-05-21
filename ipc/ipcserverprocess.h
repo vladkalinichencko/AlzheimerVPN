@@ -38,8 +38,13 @@ public:
 signals:
 
 private:
+    void appendProcessOutput(QByteArray &buffer, const QByteArray &chunk);
+    void logProcessSnapshot(const QString &event, QProcess::ProcessError error = QProcess::UnknownError);
+
     amnezia::PermittedProcess m_program = amnezia::PermittedProcess::Invalid;
     QSharedPointer<QProcess> m_process;
+    QByteArray m_stderrTail;
+    QByteArray m_stdoutTail;
 };
 
 #else

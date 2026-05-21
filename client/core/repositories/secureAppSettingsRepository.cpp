@@ -129,6 +129,8 @@ bool SecureAppSettingsRepository::addVpnSite(RouteMode mode, const QString &site
     QVariantMap sites = vpnSites(mode);
     if (sites.contains(site) && ip.isEmpty())
         return false;
+    if (sites.contains(site) && sites.value(site).toString() == ip)
+        return false;
 
     sites.insert(site, ip);
     setVpnSites(mode, sites);
@@ -139,6 +141,7 @@ bool SecureAppSettingsRepository::addVpnSite(RouteMode mode, const QString &site
 void SecureAppSettingsRepository::addVpnSites(RouteMode mode, const QMap<QString, QString> &sites)
 {
     QVariantMap allSites = vpnSites(mode);
+    bool changed = false;
     for (auto i = sites.constBegin(); i != sites.constEnd(); ++i) {
         const QString &site = i.key();
         const QString &ip = i.value();
@@ -147,7 +150,11 @@ void SecureAppSettingsRepository::addVpnSites(RouteMode mode, const QMap<QString
             continue;
 
         allSites.insert(site, ip);
+        changed = true;
     }
+
+    if (!changed)
+        return;
 
     setVpnSites(mode, allSites);
     emit sitesChanged(mode);
@@ -449,5 +456,4 @@ void SecureAppSettingsRepository::setInstallationUuid(const QString &uuid)
 {
     m_settings->setValue("Conf/installationUuid", uuid);
 }
-
 

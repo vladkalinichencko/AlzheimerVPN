@@ -1,11 +1,14 @@
 #ifndef VPNCONNECTION_H
 #define VPNCONNECTION_H
 
-#include <QObject>
+#include <QList>
 #include <QMetaObject>
-#include <QString>
-#include <QScopedPointer>
+#include <QNetworkAccessManager>
+#include <QObject>
+#include <QPointer>
 #include <QRemoteObjectNode>
+#include <QScopedPointer>
+#include <QString>
 #include <QTimer>
 
 #include "core/protocols/vpnProtocol.h"
@@ -26,7 +29,7 @@
 
 using namespace amnezia;
 
-class QTcpSocket;
+class QNetworkReply;
 
 class VpnConnection : public QObject
 {
@@ -83,9 +86,21 @@ protected slots:
 
 protected:
     QSharedPointer<VpnProtocol> m_vpnProtocol;
-    virtual void connectConnectivityProbe(QTcpSocket *socket);
+    // Overridable so unit tests can suppress real network probes and drive
+    // onConnectivityProbeSucceeded/Failed by hand.
+    virtual void connectConnectivityProbe();
 
 private:
+    // HTTP probes validate traffic. DNS failures have a separate diagnostic
+    // state, because an IP-only HTTP probe can still pass while domain lookup
+    // is broken.
+    struct ConnectivityProbe
+    {
+        QList<QPointer<QNetworkReply>> replies;
+        int finishedCount = 0;
+        bool decided = false;
+    };
+
     SecureServersRepository* m_serversRepository;
     SecureAppSettingsRepository* m_appSettingsRepository;
 
@@ -97,7 +112,13 @@ private:
     QTimer m_checkTimer;
     QTimer m_connectingTimer;
     QTimer m_healthTimer;
-    QScopedPointer<QTcpSocket> m_connectivityProbe;
+    // Single debounced flushDns after the per-site route batch completes — the
+    // previous design called flushDns once per resolved site and produced
+    // hundreds of "Failed to flush DNS" warnings on configs with large split
+    // lists (and also slowed teardown by piling work on the daemon).
+    QTimer m_dnsFlushDebounce;
+    QScopedPointer<QNetworkAccessManager> m_probeNetworkManager;
+    QScopedPointer<ConnectivityProbe> m_connectivityProbe;
 
 #ifdef Q_OS_ANDROID
    AndroidVpnProtocol* androidVpnProtocol = nullptr;
@@ -111,6 +132,10 @@ private:
    ErrorCode m_lastError = ErrorCode::NoError;
    int m_healthChecksWithoutTraffic = 0;
    bool m_noTrafficRecoveryAttempted = false;
+   bool m_silentReconnectInProgress = false;
+   bool m_stoppingAfterFailure = false;
+   int m_currentServerIndex = -1;
+   DockerContainer m_currentContainer = DockerContainer::None;
 
    void createProtocolConnections();
    void setConnectionHealth(ConnectionHealth health);
@@ -119,14 +144,23 @@ private:
    void stopConnectingWatchdog();
    void startConnectedHealthCheck();
    void stopConnectedHealthCheck();
+   void checkDnsHealth();
    void startConnectivityProbe();
    void stopConnectivityProbe();
+   void handleProbeReplyFinished(QNetworkReply *reply);
    void markLastError(ErrorCode error);
 
    void appendSplitTunnelingConfig();
    void appendKillSwitchConfig();
    void configureDnsSplitTunnel(const QString &gw, amnezia::RouteMode mode);
-   bool addSplitTunnelRoutes(const QString &gw, amnezia::RouteMode mode, const QStringList &ips);
+   // Asynchronous: invokes onDone(ok) on the main thread when the IPC replies
+   // arrive. Synchronous waitForFinished was here previously and caused stack
+   // overflow when called from inside per-site QHostInfo callbacks (each
+   // waitForFinished spun a nested event loop that dispatched the next pending
+   // callback on the same stack frame, recursing until SIGBUS).
+   void addSplitTunnelRoutesAsync(const QString &gw, amnezia::RouteMode mode,
+                                  const QStringList &ips,
+                                  std::function<void(bool)> onDone);
 };
 
 #endif // VPNCONNECTION_H

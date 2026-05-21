@@ -205,8 +205,8 @@ bool IpSplitTunnelingController::importSitesFromJson(const QByteArray& jsonData,
     
     for (auto jsonValue : jsonArray) {
         QJsonObject jsonObject = jsonValue.toObject();
-        QString hostname = jsonObject.value("hostname").toString("");
-        QString ip = jsonObject.value("ip").toString("");
+        QString hostname = jsonObject.value("hostname").toString("").trimmed();
+        QString ip = jsonObject.value("ip").toString("").trimmed();
         
         const SplitTunnelRule rule = SplitTunnelRule::fromText(hostname);
         QString normalizedHostname = rule.normalizedText();

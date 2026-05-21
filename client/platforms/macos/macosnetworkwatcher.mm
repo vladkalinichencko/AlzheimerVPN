@@ -66,9 +66,9 @@ void* powerMonitoringThread(void* arg) {
   logger.debug() << "BSSID changed!" << QString::fromNSString(interfaceName);
 
   if (m_watcher) {
-    m_watcher->checkInterface();
-    // Emit networkChanged signal when BSSID changes
-    emit m_watcher->networkChanged(QString::fromNSString(interfaceName));
+    if (m_watcher->checkInterface()) {
+      emit m_watcher->networkChanged(QString::fromNSString(interfaceName));
+    }
   }
 }
 
@@ -257,18 +257,18 @@ void MacOSNetworkWatcher::start() {
   logger.debug() << "MacOSNetworkWatcher started successfully";
 }
 
-void MacOSNetworkWatcher::checkInterface() {
+bool MacOSNetworkWatcher::checkInterface() {
   logger.debug() << "Checking interface";
 
   if (!isActive()) {
     logger.debug() << "Feature disabled";
-    return;
+    return false;
   }
 
   CWWiFiClient* client = CWWiFiClient.sharedWiFiClient;
   if (!client) {
     logger.debug() << "Unable to retrieve the CWWiFiClient shared instance";
-    return;
+    return false;
   }
 
   for (CWInterface* interface in client.interfaces) {
@@ -279,8 +279,9 @@ void MacOSNetworkWatcher::checkInterface() {
     logger.debug() << "Found active WiFi connection on"
                    << QString::fromNSString(interface.interfaceName)
                    << "SSID:" << QString::fromNSString(interface.ssid);
-    return;
+    return true;
   }
 
   logger.debug() << "No active WiFi connection found";
+  return false;
 }

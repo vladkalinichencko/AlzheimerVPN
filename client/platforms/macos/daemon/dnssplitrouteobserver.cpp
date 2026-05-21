@@ -99,8 +99,6 @@ void DnsSplitRouteObserver::readClientDatagrams()
         }
 
         const quint16 originalId = messageId(request);
-        const quint16 forwardedId = nextQueryId();
-        setMessageId(request, forwardedId);
 
         PendingQuery pending;
         pending.clientAddress = clientAddress;
@@ -108,9 +106,13 @@ void DnsSplitRouteObserver::readClientDatagrams()
         pending.originalId = originalId;
         pending.host = host;
         pending.matched = matchesRules(host);
-        m_pendingQueries.insert(forwardedId, pending);
-
-        m_upstreamSocket.writeDatagram(request, m_upstreamServers.first(), 53);
+        for (const QHostAddress &upstream : m_upstreamServers) {
+            QByteArray forwardedRequest = request;
+            const quint16 forwardedId = nextQueryId();
+            setMessageId(forwardedRequest, forwardedId);
+            m_pendingQueries.insert(forwardedId, pending);
+            m_upstreamSocket.writeDatagram(forwardedRequest, upstream, 53);
+        }
     }
 }
 
@@ -127,6 +129,17 @@ void DnsSplitRouteObserver::readUpstreamDatagrams()
         }
 
         const PendingQuery pending = m_pendingQueries.take(forwardedId);
+        for (auto it = m_pendingQueries.begin(); it != m_pendingQueries.end();) {
+            const PendingQuery other = it.value();
+            if (other.originalId == pending.originalId &&
+                other.clientAddress == pending.clientAddress &&
+                other.clientPort == pending.clientPort &&
+                other.host == pending.host) {
+                it = m_pendingQueries.erase(it);
+            } else {
+                ++it;
+            }
+        }
         const QStringList ips = DnsMessageParser::responseIpv4Addresses(response);
         setMessageId(response, pending.originalId);
         m_clientSocket.writeDatagram(response, pending.clientAddress, pending.clientPort);

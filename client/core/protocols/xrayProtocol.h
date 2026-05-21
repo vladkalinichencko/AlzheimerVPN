@@ -35,6 +35,9 @@ private:
     int m_socksPort = 10808;
 
     QSharedPointer<IpcProcessInterfaceReplica> m_tun2socksProcess;
+    // Guards re-entrancy: tun2socks::finished can be re-emitted from a queued
+    // metacall while stop() is already running, otherwise stop() recurses.
+    bool m_stopping = false;
 };
 
 #endif // XRAYPROTOCOL_H

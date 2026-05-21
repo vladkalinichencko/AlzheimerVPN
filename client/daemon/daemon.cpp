@@ -144,7 +144,11 @@ bool Daemon::activate(const InterfaceConfig& config) {
 
   // Configure routing for excluded addresses.
   for (const QString& i : config.m_excludedAddresses) {
-    addExclusionRoute(IPAddress(i));
+    const QString address = i.trimmed();
+    if (address.isEmpty()) {
+      continue;
+    }
+    addExclusionRoute(IPAddress(address));
   }
 
   configureSplitTunnelDnsRoutes(config);
@@ -547,7 +551,11 @@ bool Daemon::switchServer(const InterfaceConfig& config) {
 
   // Configure routing for new excluded addresses.
   for (const QString& i : config.m_excludedAddresses) {
-    addExclusionRoute(IPAddress(i));
+    const QString address = i.trimmed();
+    if (address.isEmpty()) {
+      continue;
+    }
+    addExclusionRoute(IPAddress(address));
   }
 
   // Activate the new peer and its routes.
@@ -564,7 +572,11 @@ bool Daemon::switchServer(const InterfaceConfig& config) {
 
   // Remove routing entries for the old peer.
   for (const QString& i : lastConfig.m_excludedAddresses) {
-    delExclusionRoute(QHostAddress(i));
+    const QString address = i.trimmed();
+    if (address.isEmpty()) {
+      continue;
+    }
+    delExclusionRoute(QHostAddress(address));
   }
   for (const IPAddress& ip : lastConfig.m_allowedIPAddressRanges) {
     if (!config.m_allowedIPAddressRanges.contains(ip)) {
@@ -658,18 +670,23 @@ void Daemon::configureSplitTunnelDnsRoutes(const InterfaceConfig& config) {
   ++m_splitTunnelDnsGeneration;
   m_splitTunnelDnsKillSwitchEnabled = config.m_killSwitchEnabled;
   clearSplitTunnelDnsRoutes();
-  dnsutils()->configureSplitTunnelRules(QStringList());
 
   m_splitTunnelDnsResolveHosts.clear();
+  QStringList wildcardRules;
   for (const QString& ruleText : config.m_splitTunnelDnsRules) {
     const amnezia::SplitTunnelRule rule =
         amnezia::SplitTunnelRule::fromText(ruleText);
     if (rule.isValid() &&
         rule.type() == amnezia::SplitTunnelRule::Type::ExactHost) {
       m_splitTunnelDnsResolveHosts.append(rule.normalizedText());
+    } else if (rule.isValid() &&
+               rule.type() == amnezia::SplitTunnelRule::Type::WildcardHost) {
+      wildcardRules.append(rule.normalizedText());
     }
   }
   m_splitTunnelDnsResolveHosts.removeDuplicates();
+  wildcardRules.removeDuplicates();
+  dnsutils()->configureSplitTunnelRules(wildcardRules);
 
   if (m_splitTunnelDnsResolveHosts.isEmpty()) {
     m_splitTunnelDnsRefreshTimer.stop();
@@ -737,4 +754,3 @@ void Daemon::onSplitTunnelHostResolved(const QString& host,
     KillSwitch::instance()->addAllowedRange(routedIps);
   }
 }
-

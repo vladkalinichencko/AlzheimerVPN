@@ -20,6 +20,18 @@ int runApplication(int argc, char** argv)
 {
     QCoreApplication app(argc,argv);
 
+    // Always init service-side logger at startup. Upstream Amnezia only inits
+    // the file logger after the GUI sends an IPC `setLogsEnabled(true)` — that
+    // is useless for debugging daemon-startup failures: if the daemon dies or
+    // zombifies (e.g. QLocalServer::listen() fails and we get the silent
+    // headless-process state captured at 2026-05-21 18:13) the GUI can never
+    // send the toggle and the daemon never writes a single line. With this
+    // unconditional init, /var/log/<APP>/<SERVICE>.log gets the daemon-side
+    // story from the moment the process starts, regardless of GUI state.
+    if (Logger::init(true)) {
+        qInfo() << "Daemon log file initialized at" << Logger::serviceLogsFilePath();
+    }
+
 #ifdef Q_OS_WIN
     if(argc > 2){
         s_argc = argc;

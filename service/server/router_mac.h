@@ -9,6 +9,7 @@
 #include <QDebug>
 #include <QObject>
 #include <QList>
+#include <QSet>
 
 #include "../client/platforms/macos/daemon/dnsutilsmacos.h"
 
@@ -51,6 +52,7 @@ private:
     DnsUtilsMacos *m_dnsUtil;
     QString m_dnsSplitTunnelGateway;
     bool m_dnsSplitTunnelKillSwitchEnabled = false;
+    QSet<QString> m_dnsSplitTunnelIps;
 };
 
 #endif // ROUTERMAC_H

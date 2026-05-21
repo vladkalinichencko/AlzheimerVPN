@@ -17,8 +17,12 @@
 
 #include <exception>
 
+#ifndef AMNEZIA_XRAY_TUN_NAME
+#define AMNEZIA_XRAY_TUN_NAME "utun22"
+#endif
+
 #ifdef Q_OS_MACOS
-static const QString tunName = "utun22";
+static const QString tunName = QString::fromLatin1(AMNEZIA_XRAY_TUN_NAME);
 #else
 static const QString tunName = "tun2";
 #endif
@@ -87,55 +91,79 @@ ErrorCode XrayProtocol::start()
 
     return IpcClient::withInterface(
             [&](QSharedPointer<IpcInterfaceReplica> iface) {
+                // Note: the kill-switch hole for the VPN server IP is opened in
+                // VpnConnection::connectToVpn, before any protocol-specific start.
+                // This is the single business-logic entry for all protocols.
+                qInfo() << "XrayProtocol::start: invoking iface->xrayStart, config size="
+                        << xrayConfigStr.size();
                 auto xrayStart = iface->xrayStart(xrayConfigStr);
-                if (!xrayStart.waitForFinished() || !xrayStart.returnValue()) {
-                    qCritical() << "Failed to start xray";
+                const bool finished = xrayStart.waitForFinished();
+                const bool returned = finished ? xrayStart.returnValue() : false;
+                qInfo() << "XrayProtocol::start: xrayStart finished=" << finished
+                        << "returnValue=" << returned;
+                if (!finished || !returned) {
+                    qCritical() << "XrayProtocol::start: Failed to start xray (finished="
+                                << finished << ", returnValue=" << returned << ")";
                     return ErrorCode::XrayExecutableCrashed;
                 }
-                return startTun2Socks();
+                const ErrorCode tunResult = startTun2Socks();
+                qInfo() << "XrayProtocol::start: startTun2Socks returned" << static_cast<int>(tunResult);
+                return tunResult;
             },
-            []() { return ErrorCode::AmneziaServiceConnectionFailed; });
+            []() {
+                qCritical() << "XrayProtocol::start: withInterface fell to onFailure — IPC unavailable";
+                return ErrorCode::AmneziaServiceConnectionFailed;
+            });
 }
 
 void XrayProtocol::stop()
 {
     qDebug() << "XrayProtocol::stop()";
 
-    IpcClient::withInterface([](QSharedPointer<IpcInterfaceReplica> iface) {
-        auto disableKillSwitch = iface->disableKillSwitch();
-        if (!disableKillSwitch.waitForFinished() || !disableKillSwitch.returnValue())
-            qWarning() << "Failed to disable killswitch";
+    // Idempotent: re-entering stop() (e.g. from a queued tun2socks finished
+    // signal arriving while we're tearing down) used to recurse via
+    // waitForFinished spinning a nested event loop. Combined with the chained
+    // synchronous IPC calls below, that produced the 25 s hang on close
+    // captured in stack-shot 2026-05-20-18:17:50.
+    if (m_stopping) {
+        return;
+    }
+    m_stopping = true;
 
-        auto StartRoutingIpv6 = iface->StartRoutingIpv6();
-        if (!StartRoutingIpv6.waitForFinished() || !StartRoutingIpv6.returnValue())
-            qWarning() << "Failed to start routing ipv6";
-
-        auto restoreResolvers = iface->restoreResolvers();
-        if (!restoreResolvers.waitForFinished() || !restoreResolvers.returnValue())
-            qWarning() << "Failed to restore resolvers";
-
-        auto deleteTun = iface->deleteTun(tunName);
-        if (!deleteTun.waitForFinished() || !deleteTun.returnValue())
-            qWarning() << "Failed to delete tun";
-
-        auto xrayStop = iface->xrayStop();
-        if (!xrayStop.waitForFinished() || !xrayStop.returnValue())
-            qWarning() << "Failed to stop xray";
-    });
+    QSharedPointer<IpcInterfaceReplica> iface = IpcClient::Interface();
+    if (!iface.isNull() && iface->isReplicaValid()) {
+        // Fire-and-forget. Each prior waitForFinished could spin the event loop
+        // and dispatch a queued tun2socks::finished → stop() → recursion → hang.
+        IpcClient::async(this, iface->disableKillSwitch(),
+            [](bool ok) { if (!ok) qWarning() << "Failed to disable killswitch"; });
+        IpcClient::async(this, iface->StartRoutingIpv6(),
+            [](bool ok) { if (!ok) qWarning() << "Failed to start routing ipv6"; });
+        IpcClient::async(this, iface->restoreResolvers(),
+            [](bool ok) { if (!ok) qWarning() << "Failed to restore resolvers"; });
+        // Intentionally DO NOT call deleteTun here. It pkills any tun2socks
+        // bound to tunName on the daemon side; because we're async, this
+        // request can arrive AFTER the user's next Connect has already spawned
+        // a fresh tun2socks on the same utun — and the late-arriving pkill
+        // kills the fresh one. That produced the "Disconnect → Connect → 803
+        // immediately" loop. Cleanup of stale tun2socks is handled defensively
+        // at the start of startTun2Socks() (synchronous, with a 1s waitForFinished),
+        // which serializes correctly with the new process spawn.
+        IpcClient::async(this, iface->xrayStop(),
+            [](bool ok) { if (!ok) qWarning() << "Failed to stop xray"; });
+    }
 
     if (m_tun2socksProcess) {
+        // Disconnect FIRST so any in-flight queued metacall from previous
+        // process state changes cannot re-enter stop().
+        QObject::disconnect(m_tun2socksProcess.data(), nullptr, this, nullptr);
         m_tun2socksProcess->blockSignals(true);
 
 #ifndef Q_OS_WIN
         m_tun2socksProcess->terminate();
-        auto waitForFinished = m_tun2socksProcess->waitForFinished(1000);
-        if (!waitForFinished.waitForFinished() || !waitForFinished.returnValue()) {
-            qWarning() << "Failed to terminate tun2socks. Killing the process...";
-            m_tun2socksProcess->kill();
-        }
+        // Best-effort kill — do not block on it. The daemon-side deleteTun above
+        // also pkills any tun2socks bound to our utun.
+        m_tun2socksProcess->kill();
 #else
-        // terminate does not do anything useful on Windows
-        // so just kill the process
         m_tun2socksProcess->kill();
 #endif
 
@@ -144,12 +172,39 @@ void XrayProtocol::stop()
     }
 
     setConnectionState(Vpn::ConnectionState::Disconnected);
+    m_stopping = false;
 }
 
 ErrorCode XrayProtocol::startTun2Socks()
 {
+    qInfo() << "XrayProtocol::startTun2Socks: entry, tunName=" << tunName
+            << "socksPort=" << m_socksPort;
+
+    // Defensive cleanup: if a previous tun2socks is still alive on this utun
+    // (GUI crashed/restarted without teardown), spawning a new one immediately
+    // fails with "create tun: resource busy" → ErrorCode 804. Ask the daemon
+    // to free the device (deleteTun also pkills the lingering tun2socks).
+    IpcClient::withInterface([](QSharedPointer<IpcInterfaceReplica> iface) {
+        auto deleteTun = iface->deleteTun(tunName);
+        const bool ok = deleteTun.waitForFinished(1000);
+        qInfo() << "XrayProtocol::startTun2Socks: defensive deleteTun finished="
+                << ok << "returnValue=" << (ok ? deleteTun.returnValue() : false);
+    });
+
     m_tun2socksProcess = IpcClient::CreatePrivilegedProcess();
+    // CreatePrivilegedProcess returns a null QSharedPointer when the daemon-side
+    // createPrivilegedProcess() slot times out (default QRO timeout, ~30s).
+    // Dereferencing here used to SIGSEGV the GUI (crash 2026-05-21-034118.ips
+    // line "Failed to create privileged process" followed by null deref in
+    // QRemoteObjectReplica::waitForSource). Surface a clean error instead.
+    if (m_tun2socksProcess.isNull()) {
+        qCritical() << "XrayProtocol::startTun2Socks: privileged process replica is null"
+                       " (daemon failed to allocate or replica acquisition failed).";
+        return ErrorCode::AmneziaServiceConnectionFailed;
+    }
     if (!m_tun2socksProcess->waitForSource()) {
+        qCritical() << "XrayProtocol::startTun2Socks: tun2socks replica waitForSource() failed.";
+        m_tun2socksProcess.reset();
         return ErrorCode::AmneziaServiceConnectionFailed;
     }
 

@@ -70,6 +70,7 @@ target_compile_definitions(${PROJECT} PRIVATE
     AMNEZIA_DAEMON_RUN_DIR="${AMNEZIA_DAEMON_RUN_DIR}"
     AMNEZIA_WG_RUNTIME_DIR="${AMNEZIA_WG_RUNTIME_DIR}"
     AMNEZIA_DAEMON_TMP_SOCKET="${AMNEZIA_DAEMON_TMP_SOCKET}"
+    AMNEZIA_XRAY_TUN_NAME="${AMNEZIA_XRAY_TUN_NAME}"
 )
 target_include_directories(${PROJECT} PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
@@ -167,7 +168,7 @@ if(APPLE)
     cmake_policy(SET CMP0114 NEW)
 
     if(NOT BUILD_OSX_APP_IDENTIFIER)
-        set(BUILD_OSX_APP_IDENTIFIER org.amnezia.AlzheimerVPN CACHE STRING "OSX Application identifier")
+        set(BUILD_OSX_APP_IDENTIFIER org.alzheimervpn.AlzheimerVPN CACHE STRING "OSX Application identifier")
     endif()
     if(NOT BUILD_IOS_APP_IDENTIFIER)
         set(BUILD_IOS_APP_IDENTIFIER org.amnezia.AmneziaVPN CACHE STRING "iOS Application identifier")
