@@ -184,12 +184,20 @@ ErrorCode XrayProtocol::startTun2Socks()
     // (GUI crashed/restarted without teardown), spawning a new one immediately
     // fails with "create tun: resource busy" → ErrorCode 804. Ask the daemon
     // to free the device (deleteTun also pkills the lingering tun2socks).
-    IpcClient::withInterface([](QSharedPointer<IpcInterfaceReplica> iface) {
+    const bool cleanupOk = IpcClient::withInterface([](QSharedPointer<IpcInterfaceReplica> iface) {
         auto deleteTun = iface->deleteTun(tunName);
         const bool ok = deleteTun.waitForFinished(1000);
+        const bool freed = ok && deleteTun.returnValue();
         qInfo() << "XrayProtocol::startTun2Socks: defensive deleteTun finished="
-                << ok << "returnValue=" << (ok ? deleteTun.returnValue() : false);
+                << ok << "returnValue=" << freed;
+        return freed;
+    }, []() {
+        return false;
     });
+    if (!cleanupOk) {
+        qCritical() << "XrayProtocol::startTun2Socks: TUN cleanup failed before start";
+        return ErrorCode::AmneziaServiceConnectionFailed;
+    }
 
     m_tun2socksProcess = IpcClient::CreatePrivilegedProcess();
     // CreatePrivilegedProcess returns a null QSharedPointer when the daemon-side

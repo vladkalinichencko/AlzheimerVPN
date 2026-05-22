@@ -46,7 +46,7 @@ public:
     }
 
 protected:
-    void connectConnectivityProbe() override
+    void connectConnectivityProbe(QTcpSocket *) override
     {
         // No-op: tests drive onConnectivityProbeSucceeded/Failed directly.
     }

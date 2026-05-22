@@ -294,6 +294,16 @@ bool RouterMac::routeDeleteXray(const QString& ifname, const QString& gateway)
 bool RouterMac::deleteTun(const QString &dev)
 {
     qDebug().noquote() << "deleteTun start" << dev;
+    if (dev.isEmpty()) {
+        return true;
+    }
+
+    auto tunExists = [&dev]() {
+        QProcess ifconfig;
+        ifconfig.start("/sbin/ifconfig", { dev });
+        ifconfig.waitForFinished(500);
+        return ifconfig.exitStatus() == QProcess::NormalExit && ifconfig.exitCode() == 0;
+    };
 
     // On macOS the utun device is owned by the process that opened it (tun2socks).
     // The kernel only frees the device when that process exits. If a previous
@@ -302,11 +312,20 @@ bool RouterMac::deleteTun(const QString &dev)
     // "create tun: resource busy". Kill any lingering tun2socks bound to this dev.
     QProcess pkill;
     pkill.setProcessChannelMode(QProcess::MergedChannels);
-    pkill.start("/usr/bin/pkill", { "-f", QStringLiteral("tun2socks.*tun://%1\\b").arg(dev) });
+    pkill.start("/usr/bin/pkill", { "-f", QStringLiteral("tun2socks.*tun://%1").arg(dev) });
     pkill.waitForFinished(2000);
     qDebug().noquote() << "deleteTun pkill exit=" << pkill.exitCode()
                        << "out=" << QString::fromUtf8(pkill.readAll()).trimmed();
-    return true;
+
+    for (int i = 0; i < 10; ++i) {
+        if (!tunExists()) {
+            return true;
+        }
+        QThread::msleep(200);
+    }
+
+    qWarning().noquote() << "deleteTun failed: device still exists" << dev;
+    return false;
 }
 
 bool RouterMac::flushDns()

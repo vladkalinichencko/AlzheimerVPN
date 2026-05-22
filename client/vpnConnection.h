@@ -3,13 +3,14 @@
 
 #include <QList>
 #include <QMetaObject>
-#include <QNetworkAccessManager>
 #include <QObject>
 #include <QPointer>
 #include <QRemoteObjectNode>
 #include <QScopedPointer>
 #include <QString>
+#include <QTcpSocket>
 #include <QTimer>
+#include <functional>
 
 #include "core/protocols/vpnProtocol.h"
 #include "core/utils/connectionHealth.h"
@@ -28,8 +29,6 @@
 #endif
 
 using namespace amnezia;
-
-class QNetworkReply;
 
 class VpnConnection : public QObject
 {
@@ -88,19 +87,9 @@ protected:
     QSharedPointer<VpnProtocol> m_vpnProtocol;
     // Overridable so unit tests can suppress real network probes and drive
     // onConnectivityProbeSucceeded/Failed by hand.
-    virtual void connectConnectivityProbe();
+    virtual void connectConnectivityProbe(QTcpSocket *socket);
 
 private:
-    // HTTP probes validate traffic. DNS failures have a separate diagnostic
-    // state, because an IP-only HTTP probe can still pass while domain lookup
-    // is broken.
-    struct ConnectivityProbe
-    {
-        QList<QPointer<QNetworkReply>> replies;
-        int finishedCount = 0;
-        bool decided = false;
-    };
-
     SecureServersRepository* m_serversRepository;
     SecureAppSettingsRepository* m_appSettingsRepository;
 
@@ -117,8 +106,7 @@ private:
     // hundreds of "Failed to flush DNS" warnings on configs with large split
     // lists (and also slowed teardown by piling work on the daemon).
     QTimer m_dnsFlushDebounce;
-    QScopedPointer<QNetworkAccessManager> m_probeNetworkManager;
-    QScopedPointer<ConnectivityProbe> m_connectivityProbe;
+    QScopedPointer<QTcpSocket> m_connectivityProbe;
 
 #ifdef Q_OS_ANDROID
    AndroidVpnProtocol* androidVpnProtocol = nullptr;
@@ -147,17 +135,12 @@ private:
    void checkDnsHealth();
    void startConnectivityProbe();
    void stopConnectivityProbe();
-   void handleProbeReplyFinished(QNetworkReply *reply);
    void markLastError(ErrorCode error);
 
    void appendSplitTunnelingConfig();
    void appendKillSwitchConfig();
    void configureDnsSplitTunnel(const QString &gw, amnezia::RouteMode mode);
-   // Asynchronous: invokes onDone(ok) on the main thread when the IPC replies
-   // arrive. Synchronous waitForFinished was here previously and caused stack
-   // overflow when called from inside per-site QHostInfo callbacks (each
-   // waitForFinished spun a nested event loop that dispatched the next pending
-   // callback on the same stack frame, recursing until SIGBUS).
+   bool addSplitTunnelRoutes(const QString &gw, amnezia::RouteMode mode, const QStringList &ips);
    void addSplitTunnelRoutesAsync(const QString &gw, amnezia::RouteMode mode,
                                   const QStringList &ips,
                                   std::function<void(bool)> onDone);

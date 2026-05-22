@@ -69,6 +69,22 @@ This fork updates Apple-platform build and runtime glue around the current imple
 - AmneziaWG on macOS no longer loses its session shortly after handshake — the client-app legacy DNS path no longer races the daemon-side DNS observer.
 - Userspace WireGuard / AmneziaWG backend always runs with debug logging, so handshake-level failures are diagnosable in release builds.
 - The backend executable is selected from the protocol name, falling back to `wireguard-go` when no AmneziaWG obfuscation parameters are configured.
+- DNS resolver restore is idempotent: the original system resolvers are backed up once per session, and a startup sweep removes stale `127.0.0.1 + DomainName=lan` overrides left behind by a previously crashed daemon. A hard kill no longer leaves the machine without DNS until reboot.
+- The kill-switch hole for the VPN server IP is opened once, centrally, in `VpnConnection::connectToVpn` for every protocol. Per-protocol duplication that silently forgot AmneziaWG and produced "tunnel connected, no traffic" is gone.
+- Gateway API requests always try the direct endpoint first; a once-successful proxy URL is consulted only inside the bypass fallback. A previously-cached proxy that later stops resolving can no longer brick every gateway call until app restart.
+- S3 storage discovery and `lmbd-health` proxy probes run in parallel: total wait is bounded by a single timeout instead of summing across all candidates.
+- `shouldBypassProxy()` short-circuits on `QNetworkReply::TimeoutError` before attempting body decryption, so a slow upstream no longer produces a misleading "failed to decrypt the data" log line.
+- `onConnectingTimedOut` no longer overwrites the real `704 VpnHandshakeTimeout` with a generic `100 UnknownError`. The post-failure teardown ignores the intermediate `Disconnected` signal and preserves the concrete error code.
+- Automatic reconnect recreates the protocol object instead of calling `stop()`/`start()` on the same instance. Reconnect through a stale controller/socket no longer requires manually quitting and reopening the app to recover.
+- Manual disconnect force-finalizes to `Disconnected` after the protocol object is dropped, so a daemon callback that never arrives can no longer leave the UI stuck on `Disconnecting`.
+- `DnsFailed` is a dedicated probe path (periodic `QHostInfo` lookup of a stable hostname) and is decoupled from the IP HTTP traffic probe. An IP-only probe success no longer masks an actual DNS-only failure, and a later `Healthy` vote from the traffic probe no longer overrides a still-failing resolver.
+- `flushDns` is debounced via a single 500ms timer instead of firing once per resolved split-tunnel site, so large split lists no longer flood the daemon with `killall -HUP mDNSResponder`.
+- Defensive `deleteTun` at the start of `XrayProtocol::startTun2Socks` hard-fails when cleanup did not actually free the utun, instead of proceeding into a doomed spawn that exits with `ErrorCode 804`.
+- `IpcClient::async` helper replaces synchronous `waitForFinished()` for route, DNS, and connectivity probe paths. The previous nested-event-loop pattern recursed via `QHostInfo` callbacks on large split lists and crashed the client with `SIGBUS` at the stack guard.
+- DNS server routes (`dns1`/`dns2`) for `VpnAllExceptSites + VLESS/Xray` are installed through the TUN gateway. Upstream installed `/32` overrides via the LAN gateway and broke VPN-internal CGNAT resolvers such as `100.64.0.1`.
+- The fork installs its own privileged daemon (`AlzheimerVPN-service`) with its own `LaunchDaemon` plist and IPC socket, so the original Amnezia daemon is not replaced during development. Both daemons coexist; switching between apps does not require relaunching either daemon.
+- Daemon-side service logging is enabled unconditionally at process start, so daemon initialization failures are debuggable from `/var/log/AmneziaVPN/AlzheimerVPN-service.log` without needing the GUI to toggle logging first.
+- The install script seeds `Conf.installationUuid` from the original Amnezia preference plist on first fork launch, so the gateway recognizes an existing Premium account without requiring the user to re-import the profile.
 
 ## Where The Code Changed
 
