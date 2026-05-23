@@ -142,6 +142,22 @@ private slots:
         QCOMPARE(connection.lastError(), ErrorCode::VpnNoTrafficError);
     }
 
+    void dnsFailureIsNotOverwrittenByNoTraffic()
+    {
+        TestableVpnConnection connection;
+        auto *protocol = new FakePollingProtocol();
+        connection.setProtocol(protocol);
+
+        connection.setConnectionState(Vpn::ConnectionState::Connected);
+        connection.setConnectionDiagnostic(ConnectionHealth::DnsFailed);
+        for (int i = 0; i < 5; ++i) {
+            connection.checkConnectedHealth();
+        }
+
+        QCOMPARE(protocol->statusRequests, 0);
+        QCOMPARE(connection.connectionHealth(), ConnectionHealth::DnsFailed);
+    }
+
     void receivedBytesMarkConnectionHealthy()
     {
         TestableVpnConnection connection;

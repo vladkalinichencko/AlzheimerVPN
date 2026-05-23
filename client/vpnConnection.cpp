@@ -341,9 +341,6 @@ void VpnConnection::addSitesRoutes(const QString &gw, amnezia::RouteMode mode)
         if (NetworkUtilities::checkIpSubnetFormat(i.key())) {
             ips.append(i.key());
         } else {
-            if (NetworkUtilities::checkIpSubnetFormat(i.value().toString())) {
-                ips.append(i.value().toString());
-            }
             if (!amnezia::SplitTunnelRule::fromText(i.key()).isDynamicHostRule()) {
                 sites.append(i.key());
             }
@@ -358,6 +355,9 @@ void VpnConnection::addSitesRoutes(const QString &gw, amnezia::RouteMode mode)
         setConnectionHealth(ConnectionHealth::CheckingDns);
         auto addResolvedRoutes = QSharedPointer<std::function<void(const QHostInfo &, bool)>>::create();
         *addResolvedRoutes = [this, site, gw, mode, ips, addResolvedRoutes](const QHostInfo &hostInfo, bool canRetry) mutable {
+            if (m_connectionState != Vpn::ConnectionState::Connected) {
+                return;
+            }
             const QStringList resolvedIps = amnezia::SplitTunnelRoutePlanner::resolvedIpv4Routes(hostInfo, ips);
             if (resolvedIps.isEmpty()) {
                 bool hasIpv4 = false;
@@ -375,6 +375,9 @@ void VpnConnection::addSitesRoutes(const QString &gw, amnezia::RouteMode mode)
 
             addSplitTunnelRoutesAsync(gw, mode, resolvedIps,
                 [this, site, gw, mode, ips, resolvedIps, canRetry, addResolvedRoutes](bool routesAdded) mutable {
+                    if (m_connectionState != Vpn::ConnectionState::Connected) {
+                        return;
+                    }
                     if (amnezia::SplitTunnelRoutePlanner::shouldRetryRouteAdd(resolvedIps, routesAdded, canRetry)) {
                         QHostInfo::lookupHost(site, this, [addResolvedRoutes](const QHostInfo &retryHostInfo) mutable {
                             (*addResolvedRoutes)(retryHostInfo, false);
@@ -386,8 +389,11 @@ void VpnConnection::addSitesRoutes(const QString &gw, amnezia::RouteMode mode)
                         return;
                     }
 
-                    m_appSettingsRepository->addVpnSite(mode, site, resolvedIps.first());
-                    m_dnsFlushDebounce.start();
+                    QMetaObject::invokeMethod(this, [this]() {
+                        if (m_connectionState == Vpn::ConnectionState::Connected) {
+                            m_dnsFlushDebounce.start();
+                        }
+                    }, Qt::QueuedConnection);
                 });
         };
         QHostInfo::lookupHost(site, this, [addResolvedRoutes](const QHostInfo &hostInfo) mutable {
@@ -430,11 +436,13 @@ void VpnConnection::configureDnsSplitTunnel(const QString &gw, amnezia::RouteMod
                                 m_appSettingsRepository->isKillSwitchEnabled();
     setConnectionHealth(ConnectionHealth::CheckingDns);
     IpcClient::withInterface([this, rules, gw, syncKillSwitch](QSharedPointer<IpcInterfaceReplica> iface) {
-        auto reply = iface->configureDnsSplitTunnel(rules, gw, syncKillSwitch);
-        if (!reply.waitForFinished() || !reply.returnValue()) {
-            setConnectionHealth(ConnectionHealth::DnsFailed);
-            qWarning() << "VpnConnection::configureDnsSplitTunnel: Failed to configure DNS split tunnel";
-        }
+        IpcClient::async(this, iface->configureDnsSplitTunnel(rules, gw, syncKillSwitch),
+            [this](bool ok) {
+                if (!ok) {
+                    setConnectionHealth(ConnectionHealth::DnsFailed);
+                    qWarning() << "VpnConnection::configureDnsSplitTunnel: Failed to configure DNS split tunnel";
+                }
+            });
     });
 #else
     Q_UNUSED(gw);
@@ -758,9 +766,6 @@ void VpnConnection::appendSplitTunnelingConfig()
                     sites.append(ruleText);
                     continue;
                 }
-                if (NetworkUtilities::checkIpSubnetFormat(i.value().toString())) {
-                    sites.append(i.value().toString());
-                }
                 const amnezia::SplitTunnelRule rule = amnezia::SplitTunnelRule::fromText(ruleText);
                 if (!rule.isValid()) {
                     continue;
@@ -1021,6 +1026,9 @@ void VpnConnection::checkConnectedHealth()
         return;
     }
     checkDnsHealth();
+    if (m_connectionHealth == ConnectionHealth::DnsFailed) {
+        return;
+    }
     if (m_connectionHealth == ConnectionHealth::Healthy) {
         startConnectivityProbe();
         return;
@@ -1073,6 +1081,13 @@ void VpnConnection::onConnectivityProbeFailed()
 
 void VpnConnection::setConnectionHealth(ConnectionHealth health)
 {
+    if (QThread::currentThread() != thread()) {
+        QMetaObject::invokeMethod(this, [this, health]() {
+            setConnectionHealth(health);
+        }, Qt::QueuedConnection);
+        return;
+    }
+
     if (!shouldPublishConnectionHealth(health)) {
         return;
     }
@@ -1146,6 +1161,11 @@ void VpnConnection::checkDnsHealth()
         if (hostInfo.error() != QHostInfo::NoError || hostInfo.addresses().isEmpty()) {
             markLastError(ErrorCode::VpnNoTrafficError);
             setConnectionHealth(ConnectionHealth::DnsFailed);
+            return;
+        }
+        if (m_connectionHealth == ConnectionHealth::DnsFailed) {
+            markLastError(ErrorCode::NoError);
+            setConnectionHealth(ConnectionHealth::Healthy);
         }
     });
 }

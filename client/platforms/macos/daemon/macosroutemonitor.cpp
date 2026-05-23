@@ -13,6 +13,7 @@
 #include <net/route.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/sysctl.h>
 #include <unistd.h>
 
 #include <QCoreApplication>
@@ -25,6 +26,53 @@
 
 namespace {
 Logger logger("MacosRouteMonitor");
+
+// Compare memory against zero.
+int memcmpzero(const void* data, size_t len) {
+  const quint8* ptr = static_cast<const quint8*>(data);
+  while (len--) {
+    if (*ptr++) return 1;
+  }
+  return 0;
+}
+
+bool isTunnelInterfaceName(const char* ifname) {
+  return strncmp(ifname, "utun", 4) == 0;
+}
+
+bool isDefaultNetmask(const QByteArray& data) {
+  const struct sockaddr* sa =
+      reinterpret_cast<const struct sockaddr*>(data.constData());
+  if (sa->sa_family == AF_INET) {
+    struct sockaddr_in sin;
+    Q_ASSERT(sa->sa_len <= sizeof(sin));
+    memset(&sin, 0, sizeof(sin));
+    memcpy(&sin, sa, sa->sa_len);
+    return memcmpzero(&sin.sin_addr, sizeof(sin.sin_addr)) == 0;
+  }
+  if (sa->sa_family == AF_INET6) {
+    struct sockaddr_in6 sin6;
+    Q_ASSERT(sa->sa_len <= sizeof(sin6));
+    memset(&sin6, 0, sizeof(sin6));
+    memcpy(&sin6, sa, sa->sa_len);
+    return memcmpzero(&sin6.sin6_addr, sizeof(sin6.sin6_addr)) == 0;
+  }
+  return sa->sa_family == AF_UNSPEC;
+}
+
+const QByteArray* routeAddr(const QList<QByteArray>& addrlist, int addrs,
+                            int wanted) {
+  int addridx = 0;
+  for (int mask = 1; mask < wanted; mask <<= 1) {
+    if (addrs & mask) {
+      addridx++;
+    }
+  }
+  if (!(addrs & wanted) || addridx >= addrlist.count()) {
+    return nullptr;
+  }
+  return &addrlist[addridx];
+}
 }  // namespace
 
 MacosRouteMonitor::MacosRouteMonitor(const QString& ifname, QObject* parent)
@@ -47,6 +95,8 @@ MacosRouteMonitor::MacosRouteMonitor(const QString& ifname, QObject* parent)
   // Grab the default routes at startup.
   rtmFetchRoutes(AF_INET);
   rtmFetchRoutes(AF_INET6);
+  rtmFetchDefaultRoutes(AF_INET);
+  rtmFetchDefaultRoutes(AF_INET6);
 }
 
 MacosRouteMonitor::~MacosRouteMonitor() {
@@ -56,15 +106,6 @@ MacosRouteMonitor::~MacosRouteMonitor() {
     close(m_rtsock);
   }
   logger.debug() << "MacosRouteMonitor destroyed.";
-}
-
-// Compare memory against zero.
-static int memcmpzero(const void* data, size_t len) {
-  const quint8* ptr = static_cast<const quint8*>(data);
-  while (len--) {
-    if (*ptr++) return 1;
-  }
-  return 0;
 }
 
 void MacosRouteMonitor::handleRtmDelete(const struct rt_msghdr* rtm,
@@ -85,6 +126,9 @@ void MacosRouteMonitor::handleRtmDelete(const struct rt_msghdr* rtm,
   char ifname[IF_NAMESIZE] = "null";
   if (rtm->rtm_index != 0) {
     if_indextoname(rtm->rtm_index, ifname);
+  }
+  if (isTunnelInterfaceName(ifname)) {
+    return;
   }
   logger.debug() << "Route deleted via" << ifname
                  << QString("addrs(%1):").arg(rtm->rtm_addrs, 0, 16)
@@ -202,6 +246,9 @@ void MacosRouteMonitor::handleRtmUpdate(const struct rt_msghdr* rtm,
   }
 #endif
   if_indextoname(ifindex, ifname);
+  if (isTunnelInterfaceName(ifname)) {
+    return;
+  }
   logger.debug() << "Route update via" << ifname
                  << QString("addrs(%1):").arg(rtm->rtm_addrs, 0, 16)
                  << list.join(" ");
@@ -488,6 +535,103 @@ bool MacosRouteMonitor::rtmFetchRoutes(int family) {
   }
   logger.warning() << "Failed to request routing table:" << strerror(errno);
   return false;
+}
+
+bool MacosRouteMonitor::rtmFetchDefaultRoutes(int family) {
+  int mib[] = {CTL_NET, PF_ROUTE, 0, family, NET_RT_DUMP, 0};
+  size_t needed = 0;
+  if (sysctl(mib, 6, nullptr, &needed, nullptr, 0) < 0) {
+    logger.warning() << "Failed to read routing table size:" << strerror(errno);
+    return false;
+  }
+  if (needed == 0) {
+    return true;
+  }
+
+  QByteArray table(static_cast<int>(needed), Qt::Uninitialized);
+  if (sysctl(mib, 6, table.data(), &needed, nullptr, 0) < 0) {
+    logger.warning() << "Failed to read routing table:" << strerror(errno);
+    return false;
+  }
+
+  const char* next = table.constData();
+  const char* end = table.constData() + needed;
+  while (next + sizeof(struct rt_msghdr) <= end) {
+    const struct rt_msghdr* rtm =
+        reinterpret_cast<const struct rt_msghdr*>(next);
+    if (rtm->rtm_msglen < sizeof(struct rt_msghdr) ||
+        next + rtm->rtm_msglen > end) {
+      break;
+    }
+    next += rtm->rtm_msglen;
+
+    if (!(rtm->rtm_flags & RTF_UP) || !(rtm->rtm_flags & RTF_GATEWAY)) {
+      continue;
+    }
+
+    QByteArray payload(
+        reinterpret_cast<const char*>(rtm) + sizeof(struct rt_msghdr),
+        rtm->rtm_msglen - sizeof(struct rt_msghdr));
+    const QList<QByteArray> addrlist = parseAddrList(payload);
+    const QByteArray* dst = routeAddr(addrlist, rtm->rtm_addrs, RTA_DST);
+    const QByteArray* gateway =
+        routeAddr(addrlist, rtm->rtm_addrs, RTA_GATEWAY);
+    const QByteArray* netmask =
+        routeAddr(addrlist, rtm->rtm_addrs, RTA_NETMASK);
+    if (dst == nullptr || gateway == nullptr || netmask == nullptr ||
+        !isDefaultNetmask(*netmask)) {
+      continue;
+    }
+
+    unsigned int ifindex = rtm->rtm_index;
+    const QByteArray* ifp = routeAddr(addrlist, rtm->rtm_addrs, RTA_IFP);
+    if (ifp != nullptr) {
+      const struct sockaddr_dl* sdl =
+          reinterpret_cast<const struct sockaddr_dl*>(ifp->constData());
+      if (sdl->sdl_family == AF_LINK) {
+        ifindex = sdl->sdl_index;
+      }
+    }
+
+    char ifname[IF_NAMESIZE] = "null";
+    if (ifindex == 0 || if_indextoname(ifindex, ifname) == nullptr ||
+        isTunnelInterfaceName(ifname)) {
+      continue;
+    }
+
+    const struct sockaddr* dstSa =
+        reinterpret_cast<const struct sockaddr*>(dst->constData());
+    QAbstractSocket::NetworkLayerProtocol protocol;
+    int rtm_type = RTM_ADD;
+    if (dstSa->sa_family == AF_INET) {
+      if (m_defaultIfindexIpv4 != 0) {
+        rtm_type = RTM_CHANGE;
+      }
+      m_defaultGatewayIpv4 = *gateway;
+      m_defaultIfindexIpv4 = ifindex;
+      protocol = QAbstractSocket::IPv4Protocol;
+    } else if (dstSa->sa_family == AF_INET6) {
+      if (m_defaultIfindexIpv6 != 0) {
+        rtm_type = RTM_CHANGE;
+      }
+      m_defaultGatewayIpv6 = *gateway;
+      m_defaultIfindexIpv6 = ifindex;
+      protocol = QAbstractSocket::IPv6Protocol;
+    } else {
+      continue;
+    }
+
+    logger.debug() << "Fetched physical default route via" << ifname
+                   << addrToString(*gateway);
+    for (const IPAddress& prefix : m_exclusionRoutes) {
+      if (prefix.address().protocol() == protocol) {
+        rtmSendRoute(rtm_type, prefix, ifindex, gateway->constData());
+      }
+    }
+    return true;
+  }
+
+  return true;
 }
 
 bool MacosRouteMonitor::insertRoute(const IPAddress& prefix, int flags) {

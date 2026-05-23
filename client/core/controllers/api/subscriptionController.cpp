@@ -760,8 +760,6 @@ ErrorCode SubscriptionController::validateAndUpdateConfig(int serverIndex, bool 
     if (configSource == apiDefs::ConfigSource::Telegram && !hasInstalledContainers) {
         removeApiConfig(serverIndex);
         return updateServiceFromTelegram(serverIndex);
-    } else if (configSource == apiDefs::ConfigSource::AmneziaGateway && !hasInstalledContainers) {
-        return updateServiceFromGateway(serverIndex, "", true);
     } else if (configSource && isApiKeyExpired(serverIndex)) {
         qDebug() << "attempt to update api config by expires_at event";
         if (configSource == apiDefs::ConfigSource::AmneziaGateway) {
@@ -771,6 +769,15 @@ ErrorCode SubscriptionController::validateAndUpdateConfig(int serverIndex, bool 
             return updateServiceFromTelegram(serverIndex);
         }
     }
+#if defined(AMNEZIA_DESKTOP) && !defined(MACOS_NE)
+    if (configSource == apiDefs::ConfigSource::AmneziaGateway) {
+        return updateServiceFromGateway(serverIndex, "", true);
+    }
+#else
+    if (configSource == apiDefs::ConfigSource::AmneziaGateway && !hasInstalledContainers) {
+        return updateServiceFromGateway(serverIndex, "", true);
+    }
+#endif
     return ErrorCode::NoError;
 }
 
@@ -1089,4 +1096,3 @@ QFuture<QPair<ErrorCode, QString>> SubscriptionController::getRenewalLink(int se
     watcher->setFuture(postFuture);
     return promise->future();
 }
-

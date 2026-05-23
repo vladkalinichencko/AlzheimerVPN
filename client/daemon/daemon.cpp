@@ -92,7 +92,6 @@ bool Daemon::activate(const InterfaceConfig& config) {
         return false;
       }
 
-      configureSplitTunnelDnsRoutes(config);
       if (!maybeUpdateResolvers(config)) {
         return false;
       }
@@ -150,8 +149,6 @@ bool Daemon::activate(const InterfaceConfig& config) {
     }
     addExclusionRoute(IPAddress(address));
   }
-
-  configureSplitTunnelDnsRoutes(config);
 
   // Add the peer to this interface.
   if (!wgutils()->updatePeer(config)) {

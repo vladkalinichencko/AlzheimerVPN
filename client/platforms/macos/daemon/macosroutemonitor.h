@@ -39,6 +39,7 @@ class MacosRouteMonitor final : public QObject {
   bool rtmSendRoute(int action, const IPAddress& prefix, unsigned int ifindex,
                     const void* gateway, int flags = 0);
   bool rtmFetchRoutes(int family);
+  bool rtmFetchDefaultRoutes(int family);
   static void rtmAppendAddr(struct rt_msghdr* rtm, size_t maxlen, int rtaddr,
                             const void* sa);
   static QList<QByteArray> parseAddrList(const QByteArray& data);
