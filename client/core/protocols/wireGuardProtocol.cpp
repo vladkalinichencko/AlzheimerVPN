@@ -9,8 +9,9 @@
 
 #include "mozilla/localsocketcontroller.h"
 
-WireguardProtocol::WireguardProtocol(const QJsonObject &configuration, QObject *parent)
-    : VpnProtocol(configuration, parent)
+WireguardProtocol::WireguardProtocol(amnezia::Proto proto, const QJsonObject &configuration, QObject *parent)
+    : VpnProtocol(configuration, parent),
+      m_proto(proto)
 {
     m_impl.reset(new LocalSocketController());
     connect(m_impl.get(), &ControllerImpl::connected, this,
@@ -69,10 +70,11 @@ bool WireguardProtocol::requestStatus()
 
 ErrorCode WireguardProtocol::startMzImpl()
 {
-    QString protocolName = m_rawConfig.value("protocol").toString();
-    QJsonObject vpnConfigData = m_rawConfig.value(protocolName + "_config_data").toObject();
+    const QString protocolName = ProtocolUtils::protoToString(m_proto);
+    QJsonObject vpnConfigData = m_rawConfig.value(ProtocolUtils::key_proto_config_data(m_proto)).toObject();
     vpnConfigData[configKey::hostName] = NetworkUtilities::getIPAddress(vpnConfigData.value(configKey::hostName).toString());
-    m_rawConfig.insert(protocolName + "_config_data", vpnConfigData);
+    m_rawConfig.insert(ProtocolUtils::key_proto_config_data(m_proto), vpnConfigData);
+    m_rawConfig[configKey::vpnProto] = protocolName;
     m_rawConfig[configKey::hostName] = NetworkUtilities::getIPAddress(m_rawConfig[configKey::hostName].toString());
 
     m_impl->activate(m_rawConfig);

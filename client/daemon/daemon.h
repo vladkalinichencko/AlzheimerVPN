@@ -62,9 +62,10 @@ class Daemon : public QObject {
   bool addExclusionRoute(const IPAddress& address);
   bool delExclusionRoute(const IPAddress& address);
 
-  // Daemon-side split-tunnel DNS pipeline: keep host rules resolved to
-  // exclusion routes and refresh them periodically.
+  // Daemon-side split-tunnel DNS pipeline: resolve host rules to exclusion routes
+  // after activation and keep them fresh from observed DNS answers.
   void configureSplitTunnelDnsRoutes(const InterfaceConfig& config);
+  void refreshSplitTunnelStaticRoutes(const QStringList& addresses);
   void clearSplitTunnelDnsRoutes();
   void refreshSplitTunnelDnsRoutes();
   void onSplitTunnelHostResolved(const QString& host, const QStringList& ips);
@@ -98,8 +99,7 @@ class Daemon : public QObject {
   QHash<IPAddress, int> m_excludedAddrSet;
   QTimer m_handshakeTimer;
 
-  // Hosts (exact + wildcard normalized) we re-resolve periodically while
-  // the tunnel is up.
+  // Exact hosts we resolve once after activation without blocking the tunnel start.
   QStringList m_splitTunnelDnsResolveHosts;
   // IPs we already added exclusion routes for via this mechanism, so we can
   // tear them down on disconnect or rule change without touching the rest.
@@ -108,7 +108,6 @@ class Daemon : public QObject {
   // so in-flight async resolves can detect they are obsolete and stop.
   int m_splitTunnelDnsGeneration = 0;
   bool m_splitTunnelDnsKillSwitchEnabled = false;
-  QTimer m_splitTunnelDnsRefreshTimer;
 };
 
 #endif  // DAEMON_H

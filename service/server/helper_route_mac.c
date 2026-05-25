@@ -212,7 +212,8 @@ unsigned int ifscope;
 
 static const char *route_strerror(int);
 const char	*routename(), *netname();
-void	flushroutes(), newroute(), monitor(), sockaddr(), sodump(), bprintf();
+void	flushroutes(), monitor(), sockaddr(), sodump(), bprintf();
+int     newroute();
 void	print_getmsg(), print_rtmsg(), pmsg_common(), pmsg_addrs(), mask_addr();
 int	getaddr(), rtmsg(), x25_makemask();
 int	prefixlen();
@@ -302,7 +303,7 @@ mainRouteIface(argc, argv)
         case K_CHANGE:
         case K_ADD:
         case K_DELETE:
-            newroute(argc, argv);
+            ch = newroute(argc, argv);
             break;
             /* NOTREACHED */
 
@@ -318,7 +319,7 @@ mainRouteIface(argc, argv)
         }
     close(s);
     fflush(stdout);
-    return 0;
+    return ch;
     //usage(*argv);
     /* NOTREACHED */
 }
@@ -661,7 +662,7 @@ set_metric(value, key)
 	*valp = atoi(value);
 }
 
-void
+int
 newroute(argc, argv)
 	int argc;
 	register char **argv;
@@ -858,7 +859,7 @@ newroute(argc, argv)
 			break;
 	}
 	if (*cmd == 'g')
-        return;
+        return 0;
 	oerrno = errno;
 //	(void) printf("%s %s %s", cmd, ishost? "host" : "net", dest);
 //	if (*gateway) {
@@ -871,6 +872,7 @@ newroute(argc, argv)
 //	else {
 //		(void)printf(": %s\n", route_strerror(oerrno));
 //	}
+    return ret == 0 ? 0 : oerrno;
 }
 
 static void

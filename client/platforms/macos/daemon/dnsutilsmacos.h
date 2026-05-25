@@ -28,6 +28,10 @@ class DnsUtilsMacos final : public DnsUtils {
   bool restoreResolvers() override;
   void configureSplitTunnelRules(const QStringList& rules) override;
 
+ signals:
+  void splitTunnelHostResolvedWithTtl(const QString& host,
+                                      const QList<amnezia::DnsIpv4Answer>& answers);
+
  private:
   void backupResolvers();
   void backupService(const QString& uuid);

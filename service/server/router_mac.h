@@ -7,6 +7,7 @@
 #include <QSettings>
 #include <QHash>
 #include <QDebug>
+#include <QDateTime>
 #include <QObject>
 #include <QList>
 #include <QSet>
@@ -48,11 +49,23 @@ private:
     RouterMac(RouterMac const &) = delete;
     RouterMac& operator= (RouterMac const&) = delete;
 
+    bool routeAddTransient(const QString &ipWithSubnet, const QString &gw);
+    void updateDnsSplitTunnelHostLeases(const QString &host, const QList<amnezia::DnsIpv4Answer> &answers);
+    void expireDnsSplitTunnelLeases();
+    void clearDnsSplitTunnelLeases();
+    QSet<QString> activeDnsSplitTunnelIps(const QDateTime &now) const;
+    QSet<QString> savedRouteIpsForGateway(const QString &gw) const;
+    void syncDnsSplitTunnelIps(const QSet<QString> &before, const QDateTime &now);
+    void scheduleDnsSplitTunnelLeaseTimer(const QDateTime &now);
+
     QList<Route> m_addedRoutes;
     DnsUtilsMacos *m_dnsUtil;
     QString m_dnsSplitTunnelGateway;
     bool m_dnsSplitTunnelKillSwitchEnabled = false;
     QSet<QString> m_dnsSplitTunnelIps;
+    QStringList m_dnsSplitTunnelRulesKey;
+    QHash<QString, QHash<QString, QDateTime>> m_dnsSplitTunnelHostLeases;
+    QTimer m_dnsSplitTunnelLeaseTimer;
 };
 
 #endif // ROUTERMAC_H

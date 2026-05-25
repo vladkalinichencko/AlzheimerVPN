@@ -37,6 +37,7 @@
 #include <QCoreApplication>
 
 #define BRAND_IDENTIFIER "amn"
+#define FORK_BRAND_IDENTIFIER "alzheimervpn"
 
 namespace {
     Logger logger("MacOSFirewall");
@@ -52,20 +53,22 @@ namespace {
 
 #include <QProcess>
 
-static QString kRootAnchor = QStringLiteral(APPLICATION_NAME) == QStringLiteral("AmneziaVPN")
+static QString kRootAnchor = QStringLiteral(SERVICE_NAME) == QStringLiteral("AmneziaVPN-service")
     ? QStringLiteral(BRAND_IDENTIFIER)
-    : QStringLiteral(APPLICATION_NAME).toLower();
+    : QStringLiteral(FORK_BRAND_IDENTIFIER);
 static QString kPfFileBase = QStringLiteral(BRAND_IDENTIFIER);
 static QByteArray kPfWarning = "pfctl: Use of -f option, could result in flushing of rules\npresent in the main ruleset added by the system at startup.\nSee /etc/pf.conf for further details.\n";
 
 static bool isDefaultApplication()
 {
-    return QStringLiteral(APPLICATION_NAME) == QStringLiteral("AmneziaVPN");
+    return QStringLiteral(SERVICE_NAME) == QStringLiteral("AmneziaVPN-service");
 }
 
 static QString daemonDataDir()
 {
-    return QStringLiteral("/Library/Application Support/%1/pf").arg(QStringLiteral(APPLICATION_NAME));
+    return isDefaultApplication()
+        ? QStringLiteral("/Library/Application Support/AmneziaVPN/pf")
+        : QStringLiteral("/Library/Application Support/AlzheimerVPN/pf");
 }
 
 int waitForExitCode(QProcess& process)

@@ -28,6 +28,20 @@ constexpr const char* WG_RUNTIME_DIR = AMNEZIA_WG_RUNTIME_DIR;
 namespace {
 Logger logger("WireguardUtilsMacos");
 Logger logwireguard("WireguardGo");
+
+QString normalizeUapiPublicKey(const QString& value) {
+  const QByteArray hexKey = QByteArray::fromHex(value.toUtf8());
+  if (hexKey.size() == 32) {
+    return QString(hexKey.toBase64());
+  }
+
+  const QByteArray base64Key = QByteArray::fromBase64(value.toUtf8());
+  if (base64Key.size() == 32) {
+    return QString(base64Key.toBase64());
+  }
+
+  return value.trimmed();
+}
 };  // namespace
 
 WireguardUtilsMacos::WireguardUtilsMacos(QObject* parent)
@@ -321,8 +335,7 @@ QList<WireguardUtils::PeerStatus> WireguardUtilsMacos::getPeerStatus() {
       if (!status.m_pubkey.isEmpty()) {
         peerList.append(status);
       }
-      QByteArray pubkey = QByteArray::fromHex(value.toUtf8());
-      status = PeerStatus(pubkey.toBase64());
+      status = PeerStatus(normalizeUapiPublicKey(value));
     }
 
     if (name == "tx_bytes") {
@@ -442,6 +455,11 @@ QString WireguardUtilsMacos::uapiCommand(const QString& command) {
     message.append('\n');
   }
   socket.write(message);
+  if (!socket.waitForBytesWritten(WG_TUN_PROC_TIMEOUT)) {
+    logger.error() << "QLocalSocket::waitForBytesWritten() failed:"
+                   << socket.errorString();
+    return QString();
+  }
 
   QByteArray reply;
   while (!reply.contains("\n\n")) {
@@ -449,7 +467,8 @@ QString WireguardUtilsMacos::uapiCommand(const QString& command) {
       logger.error() << "UAPI command timed out";
       return QString();
     }
-    QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+    socket.waitForReadyRead(100);
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
     reply.append(socket.readAll());
   }
 

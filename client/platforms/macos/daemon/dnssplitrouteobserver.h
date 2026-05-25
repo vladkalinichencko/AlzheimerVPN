@@ -7,6 +7,7 @@
 #include <QStringList>
 #include <QUdpSocket>
 
+#include "core/utils/dnsMessageParser.h"
 #include "core/utils/splitTunnelRule.h"
 
 class DnsSplitRouteObserver final : public QObject
@@ -22,7 +23,7 @@ public:
     bool isActive() const;
 
 signals:
-    void hostResolved(const QString &host, const QStringList &ips);
+    void hostResolved(const QString &host, const QList<amnezia::DnsIpv4Answer> &answers);
 
 private slots:
     void readClientDatagrams();
@@ -34,6 +35,7 @@ private:
         quint16 clientPort = 0;
         quint16 originalId = 0;
         QString host;
+        QByteArray requestKey;
         bool matched = false;
     };
 

@@ -3,10 +3,22 @@
 #include <QtEndian>
 
 #include "core/utils/dnsMessageParser.h"
+#include "logger.h"
 
 using namespace amnezia;
 
 namespace {
+    Logger logger("DnsSplitRouteObserver");
+
+    QStringList addressStrings(const QList<QHostAddress> &addresses)
+    {
+        QStringList result;
+        for (const QHostAddress &address : addresses) {
+            result.append(address.toString());
+        }
+        return result;
+    }
+
     quint16 messageId(const QByteArray &message)
     {
         if (message.size() < 2) {
@@ -22,6 +34,7 @@ namespace {
         }
         qToBigEndian<quint16>(id, reinterpret_cast<uchar *>(message.data()));
     }
+
 }
 
 DnsSplitRouteObserver::DnsSplitRouteObserver(QObject *parent)
@@ -36,10 +49,12 @@ void DnsSplitRouteObserver::setRules(const QStringList &rules)
     m_rules.clear();
     for (const QString &ruleText : rules) {
         const SplitTunnelRule rule = SplitTunnelRule::fromText(ruleText);
-        if (rule.isValid() && rule.type() == SplitTunnelRule::Type::WildcardHost) {
+        if (rule.isValid() && rule.type() != SplitTunnelRule::Type::IpSubnet) {
             m_rules.append(rule);
         }
     }
+    logger.debug() << "DNS split rules configured input=" << QString::number(rules.size())
+                   << "active_host_rules=" << QString::number(m_rules.size());
 }
 
 bool DnsSplitRouteObserver::start(const QList<QHostAddress> &upstreamServers)
@@ -53,20 +68,30 @@ bool DnsSplitRouteObserver::start(const QList<QHostAddress> &upstreamServers)
     }
 
     if (m_rules.isEmpty() || m_upstreamServers.isEmpty()) {
+        logger.debug() << "DNS split observer not started rules="
+                       << QString::number(m_rules.size())
+                       << "upstreams=" << addressStrings(m_upstreamServers);
         return false;
     }
 
     if (!m_upstreamSocket.bind(QHostAddress::AnyIPv4, 0)) {
+        logger.warning() << "DNS split observer failed to bind upstream UDP socket:"
+                         << m_upstreamSocket.errorString();
         stop();
         return false;
     }
 
     const auto bindMode = QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint;
     if (!m_clientSocket.bind(QHostAddress::LocalHost, 53, bindMode)) {
+        logger.warning() << "DNS split observer failed to bind local UDP 127.0.0.1:53:"
+                         << m_clientSocket.errorString();
         stop();
         return false;
     }
 
+    logger.debug() << "DNS split observer started rules=" << QString::number(m_rules.size())
+                   << "upstreams=" << addressStrings(m_upstreamServers)
+                   << "udp_forward_port=" << QString::number(m_upstreamSocket.localPort());
     return true;
 }
 
@@ -95,6 +120,10 @@ void DnsSplitRouteObserver::readClientDatagrams()
 
         const QString host = DnsMessageParser::queryHost(request);
         if (host.isEmpty() || m_upstreamServers.isEmpty()) {
+            logger.debug() << "DNS split UDP query ignored host_empty="
+                           << (host.isEmpty() ? "true" : "false")
+                           << "upstream_count=" << QString::number(m_upstreamServers.size())
+                           << "size=" << QString::number(request.size());
             continue;
         }
 
@@ -105,7 +134,12 @@ void DnsSplitRouteObserver::readClientDatagrams()
         pending.clientPort = clientPort;
         pending.originalId = originalId;
         pending.host = host;
+        pending.requestKey = request;
+        setMessageId(pending.requestKey, 0);
         pending.matched = matchesRules(host);
+        logger.debug() << "DNS split query proto=udp host=" << host
+                       << "matched=" << (pending.matched ? "true" : "false")
+                       << "upstream_count=" << QString::number(m_upstreamServers.size());
         for (const QHostAddress &upstream : m_upstreamServers) {
             QByteArray forwardedRequest = request;
             const quint16 forwardedId = nextQueryId();
@@ -125,6 +159,9 @@ void DnsSplitRouteObserver::readUpstreamDatagrams()
 
         const quint16 forwardedId = messageId(response);
         if (!m_pendingQueries.contains(forwardedId)) {
+            logger.debug() << "DNS split UDP response ignored unknown_id="
+                           << QString::number(forwardedId)
+                           << "size=" << QString::number(response.size());
             continue;
         }
 
@@ -134,18 +171,25 @@ void DnsSplitRouteObserver::readUpstreamDatagrams()
             if (other.originalId == pending.originalId &&
                 other.clientAddress == pending.clientAddress &&
                 other.clientPort == pending.clientPort &&
-                other.host == pending.host) {
+                other.requestKey == pending.requestKey) {
                 it = m_pendingQueries.erase(it);
             } else {
                 ++it;
             }
         }
-        const QStringList ips = DnsMessageParser::responseIpv4Addresses(response);
+        const QList<DnsIpv4Answer> answers = DnsMessageParser::responseIpv4Answers(response);
+        QStringList ips;
+        for (const DnsIpv4Answer &answer : answers) {
+            ips.append(answer.address);
+        }
         setMessageId(response, pending.originalId);
         m_clientSocket.writeDatagram(response, pending.clientAddress, pending.clientPort);
+        logger.debug() << "DNS split response proto=udp host=" << pending.host
+                       << "matched=" << (pending.matched ? "true" : "false")
+                       << "ips=" << ips;
 
-        if (pending.matched && !ips.isEmpty()) {
-            emit hostResolved(pending.host, ips);
+        if (pending.matched && !answers.isEmpty()) {
+            emit hostResolved(pending.host, answers);
         }
     }
 }

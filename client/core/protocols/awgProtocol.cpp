@@ -1,7 +1,7 @@
 #include "awgProtocol.h"
 
 Awg::Awg(const QJsonObject &configuration, QObject *parent)
-    : WireguardProtocol(configuration, parent)
+    : WireguardProtocol(amnezia::Proto::Awg, configuration, parent)
 {
 }
 

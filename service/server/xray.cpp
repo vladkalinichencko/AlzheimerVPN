@@ -12,6 +12,7 @@
 
 #ifdef Q_OS_DARWIN
     #include <arpa/inet.h>
+    #include <atomic>
     #include <cerrno>
     #include <cstddef>
     #include <cstdint>
@@ -113,8 +114,25 @@ void Xray::sockCallback(uintptr_t fd)
 {
 #ifdef Q_OS_MAC
     if (m_defaultIfaceIdx > 0) {
-        setsockopt(fd, IPPROTO_IP, IP_BOUND_IF, &m_defaultIfaceIdx, sizeof(m_defaultIfaceIdx));
-        setsockopt(fd, IPPROTO_IPV6, IPV6_BOUND_IF, &m_defaultIfaceIdx, sizeof(m_defaultIfaceIdx));
+        errno = 0;
+        const int ipv4Result = setsockopt(fd, IPPROTO_IP, IP_BOUND_IF, &m_defaultIfaceIdx, sizeof(m_defaultIfaceIdx));
+        const int ipv4Errno = errno;
+        errno = 0;
+        const int ipv6Result = setsockopt(fd, IPPROTO_IPV6, IPV6_BOUND_IF, &m_defaultIfaceIdx, sizeof(m_defaultIfaceIdx));
+        const int ipv6Errno = errno;
+
+        if (ipv4Result == 0 || ipv6Result == 0) {
+            static std::atomic_bool loggedBoundSocket{false};
+            if (!loggedBoundSocket.exchange(true)) {
+                qInfo() << "[xray] bound outbound sockets to interface index" << m_defaultIfaceIdx
+                        << "ipv4_ok=" << (ipv4Result == 0)
+                        << "ipv6_ok=" << (ipv6Result == 0);
+            }
+        } else {
+            qWarning() << "[xray] failed to bind outbound socket to interface index" << m_defaultIfaceIdx
+                       << "ipv4_errno=" << ipv4Errno << strerror(ipv4Errno)
+                       << "ipv6_errno=" << ipv6Errno << strerror(ipv6Errno);
+        }
     }
 #endif
 #ifdef Q_OS_WIN

@@ -16,7 +16,7 @@ class WireguardProtocol : public VpnProtocol
     Q_OBJECT
 
 public:
-    explicit WireguardProtocol(const QJsonObject& configuration, QObject* parent = nullptr);
+    explicit WireguardProtocol(amnezia::Proto proto, const QJsonObject& configuration, QObject* parent = nullptr);
     virtual ~WireguardProtocol() override;
 
     ErrorCode start() override;
@@ -28,6 +28,7 @@ public:
 
 private:
 
+    amnezia::Proto m_proto;
     QScopedPointer<ControllerImpl> m_impl;
 };
 

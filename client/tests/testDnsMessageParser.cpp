@@ -103,6 +103,15 @@ private slots:
         QCOMPARE(ips, QStringList({ "188.130.155.243" }));
     }
 
+    void testARecordTtl()
+    {
+        const QList<DnsIpv4Answer> answers = DnsMessageParser::responseIpv4Answers(
+            responseWithARecord("moodle.innopolis.university", QByteArray::fromHex("bc829bf3")));
+        QCOMPARE(answers.size(), 1);
+        QCOMPARE(answers.first().address, QString("188.130.155.243"));
+        QCOMPARE(answers.first().ttlSeconds, 60);
+    }
+
     void testCnameAndARecord()
     {
         const QStringList ips = DnsMessageParser::responseIpv4Addresses(

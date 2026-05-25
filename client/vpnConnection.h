@@ -10,7 +10,6 @@
 #include <QString>
 #include <QTcpSocket>
 #include <QTimer>
-#include <functional>
 
 #include "core/protocols/vpnProtocol.h"
 #include "core/utils/connectionHealth.h"
@@ -141,9 +140,6 @@ private:
    void appendKillSwitchConfig();
    void configureDnsSplitTunnel(const QString &gw, amnezia::RouteMode mode);
    bool addSplitTunnelRoutes(const QString &gw, amnezia::RouteMode mode, const QStringList &ips);
-   void addSplitTunnelRoutesAsync(const QString &gw, amnezia::RouteMode mode,
-                                  const QStringList &ips,
-                                  std::function<void(bool)> onDone);
 };
 
 #endif // VPNCONNECTION_H

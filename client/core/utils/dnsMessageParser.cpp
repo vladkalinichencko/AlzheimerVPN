@@ -1,5 +1,8 @@
 #include "dnsMessageParser.h"
 
+#include <algorithm>
+#include <limits>
+
 #include <QtEndian>
 
 using namespace amnezia;
@@ -8,6 +11,11 @@ namespace {
     quint16 readUint16(const QByteArray &message, int offset)
     {
         return qFromBigEndian<quint16>(reinterpret_cast<const uchar *>(message.constData() + offset));
+    }
+
+    quint32 readUint32(const QByteArray &message, int offset)
+    {
+        return qFromBigEndian<quint32>(reinterpret_cast<const uchar *>(message.constData() + offset));
     }
 }
 
@@ -25,9 +33,9 @@ QString DnsMessageParser::queryHost(const QByteArray &message)
     return host.toLower();
 }
 
-QStringList DnsMessageParser::responseIpv4Addresses(const QByteArray &message)
+QList<DnsIpv4Answer> DnsMessageParser::responseIpv4Answers(const QByteArray &message)
 {
-    QStringList result;
+    QList<DnsIpv4Answer> result;
     if (message.size() < 12) {
         return result;
     }
@@ -55,6 +63,7 @@ QStringList DnsMessageParser::responseIpv4Addresses(const QByteArray &message)
 
         const quint16 type = readUint16(message, offset);
         const quint16 klass = readUint16(message, offset + 2);
+        const quint32 ttl = readUint32(message, offset + 4);
         const quint16 dataLength = readUint16(message, offset + 8);
         offset += 10;
 
@@ -64,12 +73,26 @@ QStringList DnsMessageParser::responseIpv4Addresses(const QByteArray &message)
 
         if (type == 1 && klass == 1 && dataLength == 4) {
             const uchar *p = reinterpret_cast<const uchar *>(message.constData() + offset);
-            result.append(QStringLiteral("%1.%2.%3.%4").arg(p[0]).arg(p[1]).arg(p[2]).arg(p[3]));
+            const QString address = QStringLiteral("%1.%2.%3.%4").arg(p[0]).arg(p[1]).arg(p[2]).arg(p[3]);
+            const auto existing = std::find_if(result.begin(), result.end(), [&address](const DnsIpv4Answer &answer) {
+                return answer.address == address;
+            });
+            if (existing == result.end()) {
+                result.append({ address, int(qMin<quint32>(ttl, std::numeric_limits<int>::max())) });
+            }
         }
         offset += dataLength;
     }
 
-    result.removeDuplicates();
+    return result;
+}
+
+QStringList DnsMessageParser::responseIpv4Addresses(const QByteArray &message)
+{
+    QStringList result;
+    for (const DnsIpv4Answer &answer : responseIpv4Answers(message)) {
+        result.append(answer.address);
+    }
     return result;
 }
 

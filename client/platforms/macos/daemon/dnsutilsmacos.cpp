@@ -8,12 +8,31 @@
 #include <systemconfiguration/scpreferences.h>
 
 #include <QScopeGuard>
+#include <QProcess>
 
 #include "leakdetector.h"
 #include "logger.h"
+#include "version.h"
 
 namespace {
 Logger logger("DnsUtilsMacos");
+
+QString localResolverDomain()
+{
+  return QStringLiteral(SERVICE_NAME) == QStringLiteral("AmneziaVPN-service")
+      ? QStringLiteral("lan")
+      : QStringLiteral("alzheimervpn.lan");
+}
+
+void flushSystemDns()
+{
+  QProcess p;
+  p.setProcessChannelMode(QProcess::MergedChannels);
+  p.start(QStringLiteral("killall"),
+          QStringList() << QStringLiteral("-HUP") << QStringLiteral("mDNSResponder"));
+  p.waitForFinished();
+  logger.debug() << "OUTPUT killall -HUP mDNSResponder:" << p.readAll();
+}
 }
 
 DnsUtilsMacos::DnsUtilsMacos(QObject* parent) : DnsUtils(parent) {
@@ -37,7 +56,7 @@ DnsUtilsMacos::DnsUtilsMacos(QObject* parent) : DnsUtils(parent) {
 
   logger.debug() << "DnsUtilsMacos created.";
   connect(&m_splitRouteObserver, &DnsSplitRouteObserver::hostResolved,
-          this, &DnsUtils::splitTunnelHostResolved);
+          this, &DnsUtilsMacos::splitTunnelHostResolvedWithTtl);
 }
 
 DnsUtilsMacos::~DnsUtilsMacos() {
@@ -137,7 +156,7 @@ static bool isAmneziaLocalResolverConfig(CFTypeRef ref) {
   CFTypeRef domain = CFDictionaryGetValue(config, kSCPropNetDNSDomainName);
 
   return cfParseStringList(servers) == QStringList{QStringLiteral("127.0.0.1")} &&
-         cfParseString(domain) == QStringLiteral("lan");
+         cfParseString(domain) == localResolverDomain();
 }
 
 bool DnsUtilsMacos::updateResolvers(const QString& ifname,
@@ -173,7 +192,7 @@ bool DnsUtilsMacos::updateResolvers(const QString& ifname,
       &kCFTypeDictionaryValueCallBacks);
   auto configGuard = qScopeGuard([&] { CFRelease(dnsConfig); });
   cfDictSetStringList(dnsConfig, kSCPropNetDNSServerAddresses, resolverList);
-  cfDictSetString(dnsConfig, kSCPropNetDNSDomainName, "lan");
+  cfDictSetString(dnsConfig, kSCPropNetDNSDomainName, localResolverDomain());
 
   // Backup each network service's DNS config, and replace it with ours.
   for (CFIndex i = 0; i < CFArrayGetCount(netServices); i++) {
@@ -194,6 +213,7 @@ bool DnsUtilsMacos::updateResolvers(const QString& ifname,
     SCDynamicStoreSetValue(m_scStore, dnsPath, dnsConfig);
     CFRelease(dnsPath);
   }
+  flushSystemDns();
   return true;
 }
 
@@ -303,6 +323,8 @@ void DnsUtilsMacos::removeStaleLocalResolverOverrides() {
 
 void DnsUtilsMacos::configureSplitTunnelRules(const QStringList& rules)
 {
+  logger.debug() << "Configuring DNS split tunnel rules count="
+                 << QString::number(rules.size());
   m_splitRouteObserver.setRules(rules);
   if (!m_currentResolvers.isEmpty()) {
     updateResolvers(QString(), m_currentResolvers);

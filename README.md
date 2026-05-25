@@ -21,6 +21,7 @@ Split tunneling is built around hostnames resolving to concrete IP routes at con
 - Every IPv4 address returned by DNS is routed.
 - If route installation only partially succeeds, the hostname is resolved again and route installation is retried once.
 - Wildcard hostnames can be matched from observed system DNS responses on macOS.
+- DNS-observed routes follow DNS TTLs: an IP stays routed only while at least one matching hostname still has a live DNS lease for it.
 
 The practical result: services with rotating DNS answers are handled as changing network targets.
 
@@ -56,7 +57,7 @@ This fork updates Apple-platform build and runtime glue around the current imple
 
 - URL-like split-tunneling input is normalized to a routable hostname; scheme, path, whitespace and casing no longer break a rule.
 - Domain split-tunnel rules are resolved to concrete IPv4 routes at connect time, with a single DNS re-resolution retry on partial route failure.
-- DNS-derived split-tunnel routes are refreshed when upstream IPs rotate, instead of going stale.
+- DNS-derived split-tunnel routes are refreshed from observed DNS answers and expire by DNS TTL/refcount, so rotated CDN IPs do not leave stale bypass routes behind.
 - macOS route monitor no longer marks a route as added when the kernel route add actually failed.
 - Duplicate route add (`already exists`) is treated as success, not as a route failure.
 - Bypass route IPs and the kill-switch allow-list are kept in sync.
@@ -239,6 +240,6 @@ The useful upstream work can be reviewed in three areas.
 
 First, connection diagnostics: health states, structured failure logs, watchdog behavior, and filtering that keeps stale diagnostics out of the UI.
 
-Second, split tunneling: hostname normalization, DNS refresh on connection setup, all-IPv4 route installation, route retry planning, wildcard DNS observation, and kill-switch synchronization.
+Second, split tunneling: hostname normalization, DNS refresh on connection setup, all-IPv4 route installation, route retry planning, wildcard DNS observation, DNS TTL/refcount route expiry, and kill-switch synchronization.
 
 Third, Apple platform support: macOS build settings, native lifecycle cleanup, configurable naming, and the daemon-side route/firewall pieces needed for reliable split tunneling.

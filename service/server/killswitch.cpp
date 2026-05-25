@@ -8,6 +8,7 @@
 #include "../client/core/protocols/protocolUtils.h"
 #include "../client/core/utils/constants/configKeys.h"
 #include "../client/core/utils/constants/protocolConstants.h"
+#include "../client/core/utils/networkUtilities.h"
 #include "qjsonarray.h"
 #include "version.h"
 
@@ -198,6 +199,14 @@ bool KillSwitch::addAllowedRange(const QStringList &ranges) {
     return resetAllowedRange(m_allowedRanges);
 }
 
+bool KillSwitch::removeAllowedRange(const QStringList &ranges) {
+    for (const QString &range : ranges) {
+        m_allowedRanges.removeAll(range);
+    }
+
+    return resetAllowedRange(m_allowedRanges);
+}
+
 bool KillSwitch::enablePeerTraffic(const QJsonObject &configStr) {
 #ifdef Q_OS_WIN
     InterfaceConfig config;
@@ -296,14 +305,20 @@ bool KillSwitch::enableKillSwitch(const QJsonObject &configStr, int vpnAdapterIn
         blockNets = true;
         allowMarkedXray = true;
         for (auto v : splitTunnelSites) {
-            blocknets.append(v.toString());
+            const QString rule = v.toString();
+            if (NetworkUtilities::checkIpSubnetFormat(rule)) {
+                blocknets.append(rule);
+            }
         }
     } else if (splitTunnelType == 2) {
         blockAll = true;
         allowNets = true;
         allownets.append(configStr.value("vpnServer").toString());
         for (auto v : splitTunnelSites) {
-            allownets.append(v.toString());
+            const QString rule = v.toString();
+            if (NetworkUtilities::checkIpSubnetFormat(rule)) {
+                allownets.append(rule);
+            }
         }
     }
 #endif

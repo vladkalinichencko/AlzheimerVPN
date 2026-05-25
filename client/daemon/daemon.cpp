@@ -28,6 +28,12 @@ Logger logger("Daemon");
 
 Daemon* s_daemon = nullptr;
 
+bool peerKeysMatch(const QString& lhs, const QString& rhs) {
+  const QByteArray lhsKey = QByteArray::fromBase64(lhs.toUtf8());
+  const QByteArray rhsKey = QByteArray::fromBase64(rhs.toUtf8());
+  return lhsKey.size() == 32 && lhsKey == rhsKey;
+}
+
 }  // namespace
 
 Daemon::Daemon(QObject* parent) : QObject(parent) {
@@ -40,12 +46,6 @@ Daemon::Daemon(QObject* parent) : QObject(parent) {
 
   m_handshakeTimer.setSingleShot(true);
   connect(&m_handshakeTimer, &QTimer::timeout, this, &Daemon::checkHandshake);
-
-  // Re-resolve split-tunnel DNS rules every 60 seconds while connected so
-  // exclusion routes follow IP changes for things like CDN-fronted sites.
-  m_splitTunnelDnsRefreshTimer.setInterval(60000);
-  connect(&m_splitTunnelDnsRefreshTimer, &QTimer::timeout, this,
-          &Daemon::refreshSplitTunnelDnsRoutes);
 }
 
 Daemon::~Daemon() {
@@ -139,15 +139,6 @@ bool Daemon::activate(const InterfaceConfig& config) {
     if (!iputils()->setMTUAndUp(config)) {
       return false;
     }
-  }
-
-  // Configure routing for excluded addresses.
-  for (const QString& i : config.m_excludedAddresses) {
-    const QString address = i.trimmed();
-    if (address.isEmpty()) {
-      continue;
-    }
-    addExclusionRoute(IPAddress(address));
   }
 
   // Add the peer to this interface.
@@ -318,7 +309,7 @@ bool Daemon::parseConfig(const QJsonObject& obj, InterfaceConfig& config) {
     config.m_secondaryDnsServer = value.toString();
   }
 
-  config.m_protocolName = obj.value("protocol").toString();
+  GETVALUE("protocol", config.m_protocolName, String);
 
   if (!obj.contains("hopType")) {
     config.m_hopType = InterfaceConfig::SingleHop;
@@ -485,7 +476,6 @@ bool Daemon::deactivate(bool emitSignals) {
   ++m_splitTunnelDnsGeneration;
   clearSplitTunnelDnsRoutes();
   m_splitTunnelDnsResolveHosts.clear();
-  m_splitTunnelDnsRefreshTimer.stop();
   if (dnsutils()) {
     dnsutils()->configureSplitTunnelRules(QStringList());
   }
@@ -605,7 +595,7 @@ QJsonObject Daemon::getStatus() {
   const ConnectionState& connection = m_connections.first();
   QList<WireguardUtils::PeerStatus> peers = wgutils()->getPeerStatus();
   for (const WireguardUtils::PeerStatus& status : peers) {
-    if (status.m_pubkey != connection.m_config.m_serverPublicKey) {
+    if (!peerKeysMatch(status.m_pubkey, connection.m_config.m_serverPublicKey)) {
       continue;
     }
     json.insert("connected", QJsonValue(true));
@@ -639,12 +629,15 @@ void Daemon::checkHandshake() {
 
     // Check if the handshake has completed.
     for (const WireguardUtils::PeerStatus& status : peers) {
-      if (config.m_serverPublicKey != status.m_pubkey) {
+      if (!peerKeysMatch(config.m_serverPublicKey, status.m_pubkey)) {
         continue;
       }
       if (status.m_handshake != 0) {
         connection.m_date.setMSecsSinceEpoch(status.m_handshake);
         emit connected(status.m_pubkey);
+        configureSplitTunnelDnsRoutes(config);
+        refreshSplitTunnelStaticRoutes(config.m_excludedAddresses);
+        refreshSplitTunnelDnsRoutes();
       }
     }
 
@@ -669,29 +662,22 @@ void Daemon::configureSplitTunnelDnsRoutes(const InterfaceConfig& config) {
   clearSplitTunnelDnsRoutes();
 
   m_splitTunnelDnsResolveHosts.clear();
-  QStringList wildcardRules;
+  QStringList dnsRules;
   for (const QString& ruleText : config.m_splitTunnelDnsRules) {
     const amnezia::SplitTunnelRule rule =
         amnezia::SplitTunnelRule::fromText(ruleText);
-    if (rule.isValid() &&
-        rule.type() == amnezia::SplitTunnelRule::Type::ExactHost) {
-      m_splitTunnelDnsResolveHosts.append(rule.normalizedText());
-    } else if (rule.isValid() &&
-               rule.type() == amnezia::SplitTunnelRule::Type::WildcardHost) {
-      wildcardRules.append(rule.normalizedText());
+    if (!rule.isValid() ||
+        rule.type() == amnezia::SplitTunnelRule::Type::IpSubnet) {
+      continue;
     }
+    if (rule.type() == amnezia::SplitTunnelRule::Type::ExactHost) {
+      m_splitTunnelDnsResolveHosts.append(rule.normalizedText());
+    }
+    dnsRules.append(rule.normalizedText());
   }
   m_splitTunnelDnsResolveHosts.removeDuplicates();
-  wildcardRules.removeDuplicates();
-  dnsutils()->configureSplitTunnelRules(wildcardRules);
-
-  if (m_splitTunnelDnsResolveHosts.isEmpty()) {
-    m_splitTunnelDnsRefreshTimer.stop();
-    return;
-  }
-
-  QTimer::singleShot(0, this, &Daemon::refreshSplitTunnelDnsRoutes);
-  m_splitTunnelDnsRefreshTimer.start();
+  dnsRules.removeDuplicates();
+  dnsutils()->configureSplitTunnelRules(dnsRules);
 }
 
 void Daemon::clearSplitTunnelDnsRoutes() {
@@ -702,6 +688,16 @@ void Daemon::clearSplitTunnelDnsRoutes() {
     }
   }
   m_splitTunnelDnsRoutes.clear();
+}
+
+void Daemon::refreshSplitTunnelStaticRoutes(const QStringList& addresses) {
+  for (const QString& i : addresses) {
+    const QString address = i.trimmed();
+    if (address.isEmpty()) {
+      continue;
+    }
+    addExclusionRoute(IPAddress(address));
+  }
 }
 
 void Daemon::refreshSplitTunnelDnsRoutes() {

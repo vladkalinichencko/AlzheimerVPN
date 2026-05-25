@@ -2,10 +2,37 @@
 #include "helper_route_mac.h"
 #include "killswitch.h"
 
+#include <algorithm>
+
 #include <QProcess>
 #include <QThread>
 
+#include <cerrno>
+
 #include <core/utils/networkUtilities.h>
+
+namespace {
+int runRouteCommand(const QString &cmd)
+{
+    const QStringList parts = cmd.split(" ");
+
+    int argc = parts.size();
+    char **argv = new char*[argc];
+
+    for (int i = 0; i < argc; i++) {
+        argv[i] = new char[parts.at(i).toStdString().length() + 1];
+        strcpy(argv[i], parts.at(i).toStdString().c_str());
+    }
+
+    const int result = mainRouteIface(argc, argv);
+
+    for (int i = 0; i < argc; i++) {
+        delete [] argv[i];
+    }
+    delete[] argv;
+    return result;
+}
+}
 
 RouterMac &RouterMac::Instance()
 {
@@ -16,28 +43,11 @@ RouterMac &RouterMac::Instance()
 RouterMac::RouterMac()
 {
     m_dnsUtil = new DnsUtilsMacos(this);
-    connect(m_dnsUtil, &DnsUtilsMacos::splitTunnelHostResolved, this,
-            [this](const QString &host, const QStringList &ips) {
-                if (m_dnsSplitTunnelGateway.isEmpty() || ips.isEmpty()) {
-                    return;
-                }
-                QStringList newIps;
-                for (const QString &ip : ips) {
-                    if (m_dnsSplitTunnelIps.contains(ip)) {
-                        continue;
-                    }
-                    m_dnsSplitTunnelIps.insert(ip);
-                    newIps.append(ip);
-                }
-                if (newIps.isEmpty()) {
-                    return;
-                }
-                qInfo() << "RouterMac::splitTunnelHostResolved host=" << host << "new_ips=" << newIps;
-                routeAddList(m_dnsSplitTunnelGateway, newIps);
-                if (m_dnsSplitTunnelKillSwitchEnabled) {
-                    KillSwitch::instance()->addAllowedRange(newIps);
-                }
-            });
+    m_dnsSplitTunnelLeaseTimer.setSingleShot(true);
+    connect(&m_dnsSplitTunnelLeaseTimer, &QTimer::timeout,
+            this, &RouterMac::expireDnsSplitTunnelLeases);
+    connect(m_dnsUtil, &DnsUtilsMacos::splitTunnelHostResolvedWithTtl,
+            this, &RouterMac::updateDnsSplitTunnelHostLeases);
 }
 
 bool RouterMac::routeAdd(const QString &ipWithSubnet, const QString &gw)
@@ -62,24 +72,12 @@ bool RouterMac::routeAdd(const QString &ipWithSubnet, const QString &gw)
         cmd = QString("route add -net %1 %2 %3").arg(ip).arg(gw).arg(mask);
     }
 
-    QStringList parts = cmd.split(" ");
-
-    int argc = parts.size();
-    char **argv = new char*[argc];
-
-    for (int i = 0; i < argc; i++) {
-        argv[i] = new char[parts.at(i).toStdString().length() + 1];
-        strcpy(argv[i], parts.at(i).toStdString().c_str());
+    const int result = runRouteCommand(cmd);
+    if (result != 0 && result != EEXIST) {
+        qWarning().noquote() << "RouterMac::routeAdd failed result=" << result << "cmd=" << cmd;
+        return false;
     }
-
-    // TODO refactor
-    mainRouteIface(argc, argv);
     m_addedRoutes.append({ipWithSubnet, gw});
-
-    for (int i = 0; i < argc; i++) {
-        delete [] argv[i];
-    }
-    delete[] argv;
     return true;
 }
 
@@ -90,6 +88,35 @@ int RouterMac::routeAddList(const QString &gw, const QStringList &ips)
         if (routeAdd(ip, gw)) cnt++;
     }
     return cnt;
+}
+
+bool RouterMac::routeAddTransient(const QString &ipWithSubnet, const QString &gw)
+{
+    QString ip = NetworkUtilities::ipAddressFromIpWithSubnet(ipWithSubnet);
+    QString mask = NetworkUtilities::netMaskFromIpWithSubnet(ipWithSubnet);
+
+    if (!NetworkUtilities::checkIPv4Format(ip) || !NetworkUtilities::checkIPv4Format(gw)) {
+        qCritical().noquote() << "Critical, trying to add invalid transient route: " << ip << gw;
+        return false;
+    }
+
+    QString cmd;
+    if (mask == "255.255.255.255") {
+        cmd = QString("route add -host %1 %2").arg(ip).arg(gw);
+    } else {
+        cmd = QString("route add -net %1 %2 %3").arg(ip).arg(gw).arg(mask);
+    }
+
+    const int result = runRouteCommand(cmd);
+    if (result == 0) {
+        return true;
+    }
+    if (result == EEXIST) {
+        qInfo().noquote() << "RouterMac::routeAddTransient already exists cmd=" << cmd;
+    } else {
+        qWarning().noquote() << "RouterMac::routeAddTransient failed result=" << result << "cmd=" << cmd;
+    }
+    return false;
 }
 
 bool RouterMac::clearSavedRoutes()
@@ -130,22 +157,11 @@ bool RouterMac::routeDelete(const QString &ipWithSubnet, const QString &gw)
         cmd = QString("route delete -net %1 %2 %3").arg(ip).arg(gw).arg(mask);
     }
 
-    QStringList parts = cmd.split(" ");
-
-    int argc = parts.size();
-    char **argv = new char*[argc];
-
-    for (int i = 0; i < argc; i++) {
-        argv[i] = new char[parts.at(i).toStdString().length() + 1];
-        strcpy(argv[i], parts.at(i).toStdString().c_str());
+    const int result = runRouteCommand(cmd);
+    if (result != 0 && result != ESRCH) {
+        qWarning().noquote() << "RouterMac::routeDelete failed result=" << result << "cmd=" << cmd;
+        return false;
     }
-
-    mainRouteIface(argc, argv);
-
-    for (int i = 0; i < argc; i++) {
-        delete [] argv[i];
-    }
-    delete[] argv;
     return true;
 }
 
@@ -192,13 +208,169 @@ bool RouterMac::restoreResolvers() {
 
 bool RouterMac::configureDnsSplitTunnel(const QStringList &rules, const QString &gw, bool killSwitchEnabled)
 {
-    if (m_dnsSplitTunnelGateway != gw || rules.isEmpty()) {
-        m_dnsSplitTunnelIps.clear();
+    QStringList rulesKey = rules;
+    std::sort(rulesKey.begin(), rulesKey.end());
+    if (m_dnsSplitTunnelGateway != gw || m_dnsSplitTunnelRulesKey != rulesKey || rules.isEmpty()) {
+        clearDnsSplitTunnelLeases();
     }
     m_dnsSplitTunnelGateway = gw;
     m_dnsSplitTunnelKillSwitchEnabled = killSwitchEnabled;
+    m_dnsSplitTunnelRulesKey = rulesKey;
+    qInfo() << "RouterMac::configureDnsSplitTunnel rules=" << rules.count()
+            << "gateway=" << gw << "killswitch=" << killSwitchEnabled;
     m_dnsUtil->configureSplitTunnelRules(rules);
     return true;
+}
+
+void RouterMac::updateDnsSplitTunnelHostLeases(const QString &host, const QList<amnezia::DnsIpv4Answer> &answers)
+{
+    if (m_dnsSplitTunnelGateway.isEmpty() || answers.isEmpty()) {
+        return;
+    }
+
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    const QSet<QString> before = m_dnsSplitTunnelIps;
+
+    QHash<QString, QDateTime> leases;
+    for (const amnezia::DnsIpv4Answer &answer : answers) {
+        if (!NetworkUtilities::checkIPv4Format(answer.address)) {
+            continue;
+        }
+        const int ttl = qBound(1, answer.ttlSeconds, 86400);
+        leases.insert(answer.address, now.addSecs(ttl));
+    }
+
+    if (leases.isEmpty()) {
+        m_dnsSplitTunnelHostLeases.remove(host);
+    } else {
+        m_dnsSplitTunnelHostLeases.insert(host, leases);
+    }
+
+    syncDnsSplitTunnelIps(before, now);
+    scheduleDnsSplitTunnelLeaseTimer(now);
+}
+
+void RouterMac::expireDnsSplitTunnelLeases()
+{
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    const QSet<QString> before = m_dnsSplitTunnelIps;
+
+    for (auto hostIt = m_dnsSplitTunnelHostLeases.begin(); hostIt != m_dnsSplitTunnelHostLeases.end();) {
+        auto &leases = hostIt.value();
+        for (auto leaseIt = leases.begin(); leaseIt != leases.end();) {
+            if (leaseIt.value() <= now) {
+                leaseIt = leases.erase(leaseIt);
+            } else {
+                ++leaseIt;
+            }
+        }
+        if (leases.isEmpty()) {
+            hostIt = m_dnsSplitTunnelHostLeases.erase(hostIt);
+        } else {
+            ++hostIt;
+        }
+    }
+
+    syncDnsSplitTunnelIps(before, now);
+    scheduleDnsSplitTunnelLeaseTimer(now);
+}
+
+void RouterMac::clearDnsSplitTunnelLeases()
+{
+    m_dnsSplitTunnelLeaseTimer.stop();
+    QStringList ips;
+    for (const QString &ip : std::as_const(m_dnsSplitTunnelIps)) {
+        ips.append(ip);
+    }
+    if (!ips.isEmpty() && !m_dnsSplitTunnelGateway.isEmpty()) {
+        routeDeleteList(m_dnsSplitTunnelGateway, ips);
+        if (m_dnsSplitTunnelKillSwitchEnabled) {
+            KillSwitch::instance()->removeAllowedRange(ips);
+        }
+    }
+    m_dnsSplitTunnelIps.clear();
+    m_dnsSplitTunnelHostLeases.clear();
+}
+
+QSet<QString> RouterMac::activeDnsSplitTunnelIps(const QDateTime &now) const
+{
+    QSet<QString> result;
+    for (const auto &leases : m_dnsSplitTunnelHostLeases) {
+        for (auto leaseIt = leases.constBegin(); leaseIt != leases.constEnd(); ++leaseIt) {
+            if (leaseIt.value() > now) {
+                result.insert(leaseIt.key());
+            }
+        }
+    }
+    return result;
+}
+
+QSet<QString> RouterMac::savedRouteIpsForGateway(const QString &gw) const
+{
+    QSet<QString> result;
+    for (const Route &route : m_addedRoutes) {
+        if (route.gw == gw) {
+            result.insert(NetworkUtilities::ipAddressFromIpWithSubnet(route.dst));
+        }
+    }
+    return result;
+}
+
+void RouterMac::syncDnsSplitTunnelIps(const QSet<QString> &before, const QDateTime &now)
+{
+    QSet<QString> desired = activeDnsSplitTunnelIps(now);
+    desired.subtract(savedRouteIpsForGateway(m_dnsSplitTunnelGateway));
+
+    QStringList added;
+    QStringList removed;
+
+    for (const QString &ip : desired) {
+        if (!before.contains(ip) && routeAddTransient(ip, m_dnsSplitTunnelGateway)) {
+            m_dnsSplitTunnelIps.insert(ip);
+            added.append(ip);
+        }
+    }
+
+    for (const QString &ip : before) {
+        if (!desired.contains(ip) && routeDelete(ip, m_dnsSplitTunnelGateway)) {
+            m_dnsSplitTunnelIps.remove(ip);
+            removed.append(ip);
+        }
+    }
+
+    if (!added.isEmpty()) {
+        qInfo() << "RouterMac::splitTunnelLease add gateway=" << m_dnsSplitTunnelGateway
+                << "ips=" << added;
+        if (m_dnsSplitTunnelKillSwitchEnabled) {
+            KillSwitch::instance()->addAllowedRange(added);
+        }
+    }
+    if (!removed.isEmpty()) {
+        qInfo() << "RouterMac::splitTunnelLease remove gateway=" << m_dnsSplitTunnelGateway
+                << "ips=" << removed;
+        if (m_dnsSplitTunnelKillSwitchEnabled) {
+            KillSwitch::instance()->removeAllowedRange(removed);
+        }
+    }
+}
+
+void RouterMac::scheduleDnsSplitTunnelLeaseTimer(const QDateTime &now)
+{
+    QDateTime nextExpiry;
+    for (const auto &leases : m_dnsSplitTunnelHostLeases) {
+        for (const QDateTime &expiry : leases) {
+            if (expiry > now && (!nextExpiry.isValid() || expiry < nextExpiry)) {
+                nextExpiry = expiry;
+            }
+        }
+    }
+
+    if (!nextExpiry.isValid()) {
+        m_dnsSplitTunnelLeaseTimer.stop();
+        return;
+    }
+
+    m_dnsSplitTunnelLeaseTimer.start(int(qMax<qint64>(1, now.msecsTo(nextExpiry))));
 }
 
 bool RouterMac::routeAddXray(const QString& ifname, const QString& gateway)
@@ -208,35 +380,19 @@ bool RouterMac::routeAddXray(const QString& ifname, const QString& gateway)
         return false;
     }
 
-    QString cmd = QString("route add -net 0.0.0.0/1 %1 -ifscope %2").arg(gateway).arg(ifname);
-    QStringList parts = cmd.split(" ");
-
-    int argc = parts.size();
-    char **argv = new char*[argc];
-    for (int i = 0; i < argc; i++) {
-        argv[i] = new char[parts.at(i).toStdString().length() + 1];
-        strcpy(argv[i], parts.at(i).toStdString().c_str());
+    const QString firstHalf = QString("route add -net 0.0.0.0/1 %1 -ifscope %2").arg(gateway).arg(ifname);
+    const QString secondHalf = QString("route add -net 128.0.0.0/1 %1 -ifscope %2").arg(gateway).arg(ifname);
+    const int firstResult = runRouteCommand(firstHalf);
+    const int secondResult = runRouteCommand(secondHalf);
+    const bool firstOk = firstResult == 0 || firstResult == EEXIST;
+    const bool secondOk = secondResult == 0 || secondResult == EEXIST;
+    if (!firstOk || !secondOk) {
+        qWarning().noquote() << "routeAddXray failed ifname=" << ifname
+                             << "gateway=" << gateway
+                             << "first_result=" << firstResult
+                             << "second_result=" << secondResult;
+        return false;
     }
-    mainRouteIface(argc, argv);
-    for (int i = 0; i < argc; i++) {
-        delete [] argv[i];
-    }
-    delete[] argv;
-
-    cmd = QString("route add -net 128.0.0.0/1 %1 -ifscope %2").arg(gateway).arg(ifname);
-    parts = cmd.split(" ");
-
-    argc = parts.size();
-    argv = new char*[argc];
-    for (int i = 0; i < argc; i++) {
-        argv[i] = new char[parts.at(i).toStdString().length() + 1];
-        strcpy(argv[i], parts.at(i).toStdString().c_str());
-    }
-    mainRouteIface(argc, argv);
-    for (int i = 0; i < argc; i++) {
-        delete [] argv[i];
-    }
-    delete[] argv;
 
     qDebug().noquote() << "Installed xray routes via" << gateway << "on" << ifname;
     return true;
@@ -254,38 +410,21 @@ bool RouterMac::routeDeleteXray(const QString& ifname, const QString& gateway)
     } else {
         cmd = QString("route delete -net 0.0.0.0/1 -ifscope %1").arg(ifname);
     }
-    QStringList parts = cmd.split(" ");
-
-    int argc = parts.size();
-    char **argv = new char*[argc];
-    for (int i = 0; i < argc; i++) {
-        argv[i] = new char[parts.at(i).toStdString().length() + 1];
-        strcpy(argv[i], parts.at(i).toStdString().c_str());
-    }
-    mainRouteIface(argc, argv);
-    for (int i = 0; i < argc; i++) {
-        delete [] argv[i];
-    }
-    delete[] argv;
+    const int firstResult = runRouteCommand(cmd);
 
     if (!gateway.isEmpty()) {
         cmd = QString("route delete -net 128.0.0.0/1 %1 -ifscope %2").arg(gateway).arg(ifname);
     } else {
         cmd = QString("route delete -net 128.0.0.0/1 -ifscope %1").arg(ifname);
     }
-    parts = cmd.split(" ");
-
-    argc = parts.size();
-    argv = new char*[argc];
-    for (int i = 0; i < argc; i++) {
-        argv[i] = new char[parts.at(i).toStdString().length() + 1];
-        strcpy(argv[i], parts.at(i).toStdString().c_str());
+    const int secondResult = runRouteCommand(cmd);
+    if ((firstResult != 0 && firstResult != ESRCH) ||
+        (secondResult != 0 && secondResult != ESRCH)) {
+        qWarning().noquote() << "routeDeleteXray failed ifname=" << ifname
+                             << "first_result=" << firstResult
+                             << "second_result=" << secondResult;
+        return false;
     }
-    mainRouteIface(argc, argv);
-    for (int i = 0; i < argc; i++) {
-        delete [] argv[i];
-    }
-    delete[] argv;
 
     qDebug().noquote() << "Removed xray routes on" << ifname;
     return true;
