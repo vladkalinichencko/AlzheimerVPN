@@ -45,6 +45,34 @@
 #include <QHostAddress>
 #include <QHostInfo>
 
+#if defined(Q_OS_MAC) && !defined(Q_OS_IOS) && !defined(MACOS_NE)
+namespace {
+bool isPhysicalDefaultInterface(int index)
+{
+    const QNetworkInterface iface = QNetworkInterface::interfaceFromIndex(index);
+    if (!iface.isValid()) {
+        return false;
+    }
+
+    const QNetworkInterface::InterfaceFlags flags = iface.flags();
+    if (!flags.testFlag(QNetworkInterface::IsUp) ||
+        flags.testFlag(QNetworkInterface::IsLoopBack) ||
+        flags.testFlag(QNetworkInterface::IsPointToPoint)) {
+        return false;
+    }
+
+    const QString name = iface.name();
+    return !(name.startsWith("utun") ||
+             name.startsWith("awdl") ||
+             name.startsWith("llw") ||
+             name.startsWith("bridge") ||
+             name.startsWith("gif") ||
+             name.startsWith("stf") ||
+             name.startsWith("ipsec"));
+}
+}
+#endif
+
 QRegularExpression NetworkUtilities::ipAddressRegExp()
 {
     return QRegularExpression("^((25[0-5]|(2[0-4]|1[0-9]|[1-9]|)[0-9])(\\.(?!$)|$)){4}$");
@@ -401,6 +429,8 @@ QPair<QString, QNetworkInterface> NetworkUtilities::getGatewayAndIface()
 #if defined(Q_OS_MAC) && !defined(Q_OS_IOS) && !defined(MACOS_NE)
     QString gateway;
     int index = -1;
+    QString fallbackGateway;
+    int fallbackIndex = -1;
 
     int mib[] = {CTL_NET, PF_ROUTE, 0, 0, NET_RT_FLAGS, RTF_GATEWAY};
     int afinet_type[] = {AF_INET, AF_INET6};
@@ -462,6 +492,15 @@ QPair<QString, QNetworkInterface> NetworkUtilities::getGatewayAndIface()
                         {
                             gateway = dstStr4;
                             index = rt->rtm_index;
+                            if (fallbackGateway.isEmpty()) {
+                                fallbackGateway = gateway;
+                                fallbackIndex = index;
+                            }
+                            if (!isPhysicalDefaultInterface(index)) {
+                                continue;
+                            }
+                            delete[] buf;
+                            return { gateway, QNetworkInterface::interfaceFromIndex(index) };
                         }
                         break;
                     }
@@ -479,6 +518,15 @@ QPair<QString, QNetworkInterface> NetworkUtilities::getGatewayAndIface()
                         {
                             gateway = dstStr6;
                             index = rt->rtm_index;
+                            if (fallbackGateway.isEmpty()) {
+                                fallbackGateway = gateway;
+                                fallbackIndex = index;
+                            }
+                            if (!isPhysicalDefaultInterface(index)) {
+                                continue;
+                            }
+                            delete[] buf;
+                            return { gateway, QNetworkInterface::interfaceFromIndex(index) };
                         }
                         break;
                     }
@@ -488,6 +536,9 @@ QPair<QString, QNetworkInterface> NetworkUtilities::getGatewayAndIface()
         free(buf);
     }
 
+    if (!fallbackGateway.isEmpty()) {
+        return { fallbackGateway, QNetworkInterface::interfaceFromIndex(fallbackIndex) };
+    }
     return { gateway, QNetworkInterface::interfaceFromIndex(index) };
 #endif
 }
