@@ -56,7 +56,6 @@ private:
     void expireDnsSplitTunnelLeases();
     void clearDnsSplitTunnelLeases();
     QSet<QString> activeDnsSplitTunnelIps(const QDateTime &now) const;
-    QSet<QString> savedRouteIpsForGateway(const QString &gw) const;
     void syncDnsSplitTunnelIps(const QSet<QString> &before, const QDateTime &now);
     void scheduleDnsSplitTunnelLeaseTimer(const QDateTime &now);
 

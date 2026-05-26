@@ -131,6 +131,7 @@ void PageController::showOnStartup()
 #if defined(Q_OS_WIN) || (defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID))
         emit hideMainWindow();
 #elif defined(Q_OS_MACX)
+        emit hideMainWindow();
         setDockIconVisible(false);
 #endif
     }

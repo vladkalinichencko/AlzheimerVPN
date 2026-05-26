@@ -114,6 +114,7 @@ bool RouterMac::routeAddTransient(const QString &ipWithSubnet, const QString &gw
     }
     if (result == EEXIST) {
         qInfo().noquote() << "RouterMac::routeAddTransient already exists cmd=" << cmd;
+        return true;
     } else {
         qWarning().noquote() << "RouterMac::routeAddTransient failed result=" << result << "cmd=" << cmd;
     }
@@ -324,23 +325,12 @@ void RouterMac::clearDnsSplitTunnelLeases()
 
 QSet<QString> RouterMac::activeDnsSplitTunnelIps(const QDateTime &now) const
 {
+    Q_UNUSED(now);
+
     QSet<QString> result;
     for (const auto &leases : m_dnsSplitTunnelHostLeases) {
         for (auto leaseIt = leases.constBegin(); leaseIt != leases.constEnd(); ++leaseIt) {
-            if (leaseIt.value() > now) {
-                result.insert(leaseIt.key());
-            }
-        }
-    }
-    return result;
-}
-
-QSet<QString> RouterMac::savedRouteIpsForGateway(const QString &gw) const
-{
-    QSet<QString> result;
-    for (const Route &route : m_addedRoutes) {
-        if (route.gw == gw) {
-            result.insert(NetworkUtilities::ipAddressFromIpWithSubnet(route.dst));
+            result.insert(leaseIt.key());
         }
     }
     return result;
@@ -349,7 +339,6 @@ QSet<QString> RouterMac::savedRouteIpsForGateway(const QString &gw) const
 void RouterMac::syncDnsSplitTunnelIps(const QSet<QString> &before, const QDateTime &now)
 {
     QSet<QString> desired = activeDnsSplitTunnelIps(now);
-    desired.subtract(savedRouteIpsForGateway(m_dnsSplitTunnelGateway));
 
     QStringList added;
     QStringList removed;
