@@ -81,6 +81,9 @@ bool SplitTunnelRule::matchesHost(const QString &host) const
     case Type::ExactHost:
         return normalizedHost == m_value;
     case Type::WildcardHost:
+        if (m_value.startsWith("*.") && normalizedHost == m_value.mid(2)) {
+            return true;
+        }
         return m_regex.match(normalizedHost).hasMatch();
     case Type::IpSubnet:
         return false;

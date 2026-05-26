@@ -10,6 +10,7 @@
 #include <cerrno>
 
 #include <core/utils/networkUtilities.h>
+#include <core/utils/splitTunnelRule.h>
 
 namespace {
 int runRouteCommand(const QString &cmd)
@@ -219,6 +220,7 @@ bool RouterMac::configureDnsSplitTunnel(const QStringList &rules, const QString 
     qInfo() << "RouterMac::configureDnsSplitTunnel rules=" << rules.count()
             << "gateway=" << gw << "killswitch=" << killSwitchEnabled;
     m_dnsUtil->configureSplitTunnelRules(rules);
+    seedDnsSplitTunnelLeasesFromCache(rules);
     return true;
 }
 
@@ -242,37 +244,65 @@ void RouterMac::updateDnsSplitTunnelHostLeases(const QString &host, const QList<
 
     if (leases.isEmpty()) {
         m_dnsSplitTunnelHostLeases.remove(host);
+        m_dnsSplitTunnelHostCache.remove(host);
     } else {
         m_dnsSplitTunnelHostLeases.insert(host, leases);
+        m_dnsSplitTunnelHostCache.insert(host, answers);
     }
 
     syncDnsSplitTunnelIps(before, now);
     scheduleDnsSplitTunnelLeaseTimer(now);
 }
 
-void RouterMac::expireDnsSplitTunnelLeases()
+void RouterMac::seedDnsSplitTunnelLeasesFromCache(const QStringList &rules)
 {
+    if (m_dnsSplitTunnelGateway.isEmpty() || rules.isEmpty() || m_dnsSplitTunnelHostCache.isEmpty()) {
+        return;
+    }
+
     const QDateTime now = QDateTime::currentDateTimeUtc();
     const QSet<QString> before = m_dnsSplitTunnelIps;
-
-    for (auto hostIt = m_dnsSplitTunnelHostLeases.begin(); hostIt != m_dnsSplitTunnelHostLeases.end();) {
-        auto &leases = hostIt.value();
-        for (auto leaseIt = leases.begin(); leaseIt != leases.end();) {
-            if (leaseIt.value() <= now) {
-                leaseIt = leases.erase(leaseIt);
-            } else {
-                ++leaseIt;
-            }
+    int seededHosts = 0;
+    for (auto cacheIt = m_dnsSplitTunnelHostCache.constBegin(); cacheIt != m_dnsSplitTunnelHostCache.constEnd(); ++cacheIt) {
+        if (!dnsSplitTunnelHostMatchesRules(cacheIt.key(), rules)) {
+            continue;
         }
-        if (leases.isEmpty()) {
-            hostIt = m_dnsSplitTunnelHostLeases.erase(hostIt);
-        } else {
-            ++hostIt;
+
+        QHash<QString, QDateTime> leases;
+        for (const amnezia::DnsIpv4Answer &answer : cacheIt.value()) {
+            if (!NetworkUtilities::checkIPv4Format(answer.address)) {
+                continue;
+            }
+            leases.insert(answer.address, now.addSecs(qBound(1, answer.ttlSeconds, 86400)));
+        }
+        if (!leases.isEmpty()) {
+            m_dnsSplitTunnelHostLeases.insert(cacheIt.key(), leases);
+            ++seededHosts;
         }
     }
 
-    syncDnsSplitTunnelIps(before, now);
-    scheduleDnsSplitTunnelLeaseTimer(now);
+    if (seededHosts > 0) {
+        qInfo() << "RouterMac::splitTunnelLease seed_from_cache hosts=" << seededHosts;
+        syncDnsSplitTunnelIps(before, now);
+        scheduleDnsSplitTunnelLeaseTimer(now);
+    }
+}
+
+bool RouterMac::dnsSplitTunnelHostMatchesRules(const QString &host, const QStringList &rules) const
+{
+    for (const QString &ruleText : rules) {
+        const amnezia::SplitTunnelRule rule = amnezia::SplitTunnelRule::fromText(ruleText);
+        if (rule.isValid() && rule.matchesHost(host)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void RouterMac::expireDnsSplitTunnelLeases()
+{
+    m_dnsSplitTunnelLeaseTimer.stop();
+    qInfo() << "RouterMac::splitTunnelLease ttl_due keeping learned routes until DNS refresh or disconnect";
 }
 
 void RouterMac::clearDnsSplitTunnelLeases()

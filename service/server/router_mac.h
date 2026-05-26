@@ -51,6 +51,8 @@ private:
 
     bool routeAddTransient(const QString &ipWithSubnet, const QString &gw);
     void updateDnsSplitTunnelHostLeases(const QString &host, const QList<amnezia::DnsIpv4Answer> &answers);
+    void seedDnsSplitTunnelLeasesFromCache(const QStringList &rules);
+    bool dnsSplitTunnelHostMatchesRules(const QString &host, const QStringList &rules) const;
     void expireDnsSplitTunnelLeases();
     void clearDnsSplitTunnelLeases();
     QSet<QString> activeDnsSplitTunnelIps(const QDateTime &now) const;
@@ -65,6 +67,7 @@ private:
     QSet<QString> m_dnsSplitTunnelIps;
     QStringList m_dnsSplitTunnelRulesKey;
     QHash<QString, QHash<QString, QDateTime>> m_dnsSplitTunnelHostLeases;
+    QHash<QString, QList<amnezia::DnsIpv4Answer>> m_dnsSplitTunnelHostCache;
     QTimer m_dnsSplitTunnelLeaseTimer;
 };
 

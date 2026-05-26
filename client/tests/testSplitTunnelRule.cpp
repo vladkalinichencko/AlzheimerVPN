@@ -25,7 +25,7 @@ private slots:
         QVERIFY(rule.isValid());
         QCOMPARE(rule.type(), SplitTunnelRule::Type::WildcardHost);
         QVERIFY(rule.matchesHost("e9f2d330fb4d.innodatahub.innopolis.university"));
-        QVERIFY(!rule.matchesHost("innodatahub.innopolis.university"));
+        QVERIFY(rule.matchesHost("innodatahub.innopolis.university"));
     }
 
     void testWildcardPositions()
