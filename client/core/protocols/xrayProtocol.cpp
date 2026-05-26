@@ -5,9 +5,11 @@
 #include "core/utils/ipcClient.h"
 #include "core/utils/networkUtilities.h"
 #include "core/utils/serialization/serialization.h"
+#include "core/utils/splitTunnelRule.h"
 #include "ipc.h"
 
 #include <QCryptographicHash>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkInterface>
@@ -26,6 +28,100 @@ static const QString tunName = QString::fromLatin1(AMNEZIA_XRAY_TUN_NAME);
 #else
 static const QString tunName = "tun2";
 #endif
+
+namespace {
+QString xrayDomainMatcher(const amnezia::SplitTunnelRule &rule)
+{
+    switch (rule.type()) {
+    case amnezia::SplitTunnelRule::Type::ExactHost:
+        return QStringLiteral("full:") + rule.normalizedText();
+    case amnezia::SplitTunnelRule::Type::WildcardHost: {
+        const QString pattern = rule.normalizedText();
+        if (pattern.startsWith(QStringLiteral("*."))) {
+            return QStringLiteral("domain:") + pattern.mid(2);
+        }
+        QString regex = QRegularExpression::escape(pattern);
+        regex.replace(QStringLiteral("\\*"), QStringLiteral(".*"));
+        return QStringLiteral("regexp:^") + regex + QStringLiteral("$");
+    }
+    case amnezia::SplitTunnelRule::Type::IpSubnet:
+        break;
+    }
+    return {};
+}
+
+void applyXraySplitTunnelDirectRouting(QJsonObject &xrayConfig, const QJsonObject &rawConfig)
+{
+    if (static_cast<amnezia::RouteMode>(rawConfig.value(amnezia::configKey::splitTunnelType).toInt())
+        != amnezia::RouteMode::VpnAllExceptSites) {
+        return;
+    }
+
+    QJsonArray domains;
+    QSet<QString> seenDomains;
+    for (const QJsonValue &value : rawConfig.value(amnezia::configKey::splitTunnelDnsRules).toArray()) {
+        const amnezia::SplitTunnelRule rule = amnezia::SplitTunnelRule::fromText(value.toString());
+        if (!rule.isValid() || rule.type() == amnezia::SplitTunnelRule::Type::IpSubnet) {
+            continue;
+        }
+
+        const QString matcher = xrayDomainMatcher(rule);
+        if (!matcher.isEmpty() && !seenDomains.contains(matcher)) {
+            seenDomains.insert(matcher);
+            domains.append(matcher);
+        }
+    }
+    if (domains.isEmpty()) {
+        return;
+    }
+
+    QJsonArray inbounds = xrayConfig.value(QStringLiteral("inbounds")).toArray();
+    for (int i = 0; i < inbounds.size(); ++i) {
+        QJsonObject inbound = inbounds.at(i).toObject();
+        inbound.insert(QStringLiteral("sniffing"), QJsonObject{
+            {QStringLiteral("enabled"), true},
+            {QStringLiteral("destOverride"), QJsonArray{
+                QStringLiteral("http"),
+                QStringLiteral("tls"),
+                QStringLiteral("quic")
+            }},
+            {QStringLiteral("routeOnly"), true}
+        });
+        inbounds[i] = inbound;
+    }
+    xrayConfig.insert(QStringLiteral("inbounds"), inbounds);
+
+    QJsonArray outbounds = xrayConfig.value(QStringLiteral("outbounds")).toArray();
+    bool hasDirectOutbound = false;
+    for (const QJsonValue &value : outbounds) {
+        if (value.toObject().value(QStringLiteral("tag")).toString() == QStringLiteral("direct")) {
+            hasDirectOutbound = true;
+            break;
+        }
+    }
+    if (!hasDirectOutbound) {
+        outbounds.append(QJsonObject{
+            {QStringLiteral("tag"), QStringLiteral("direct")},
+            {QStringLiteral("protocol"), QStringLiteral("freedom")}
+        });
+        xrayConfig.insert(QStringLiteral("outbounds"), outbounds);
+    }
+
+    QJsonObject routing = xrayConfig.value(QStringLiteral("routing")).toObject();
+    QJsonArray rules = routing.value(QStringLiteral("rules")).toArray();
+    rules.prepend(QJsonObject{
+        {QStringLiteral("type"), QStringLiteral("field")},
+        {QStringLiteral("domain"), domains},
+        {QStringLiteral("outboundTag"), QStringLiteral("direct")}
+    });
+    routing.insert(QStringLiteral("domainStrategy"), QStringLiteral("AsIs"));
+    routing.insert(QStringLiteral("rules"), rules);
+    xrayConfig.insert(QStringLiteral("routing"), routing);
+
+    qInfo() << "XrayProtocol::start: split tunnel direct domain routing enabled domains="
+            << domains.size();
+}
+}
 
 XrayProtocol::XrayProtocol(const QJsonObject &configuration, QObject *parent) : VpnProtocol(configuration, parent)
 {
@@ -82,6 +178,7 @@ ErrorCode XrayProtocol::start()
     m_socksUser = creds.username;
     m_socksPassword = creds.password;
     m_socksPort = creds.port;
+    applyXraySplitTunnelDirectRouting(m_xrayConfig, m_rawConfig);
 
     const QString xrayConfigStr = QJsonDocument(m_xrayConfig).toJson(QJsonDocument::Compact);
     if (xrayConfigStr.isEmpty()) {

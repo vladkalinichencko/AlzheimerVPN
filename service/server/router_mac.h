@@ -14,6 +14,8 @@
 
 #include "../client/platforms/macos/daemon/dnsutilsmacos.h"
 
+class QHostInfo;
+
 /**
  * @brief The Router class - General class for handling ip routing
  */
@@ -52,6 +54,9 @@ private:
     bool routeAddTransient(const QString &ipWithSubnet, const QString &gw);
     void updateDnsSplitTunnelHostLeases(const QString &host, const QList<amnezia::DnsIpv4Answer> &answers);
     void seedDnsSplitTunnelLeasesFromCache(const QStringList &rules);
+    void startDnsSplitTunnelPrewarm(const QStringList &rules);
+    void pumpDnsSplitTunnelPrewarm();
+    void finishDnsSplitTunnelPrewarmHost(int generation, const QString &host, const QHostInfo &info);
     bool dnsSplitTunnelHostMatchesRules(const QString &host, const QStringList &rules) const;
     void expireDnsSplitTunnelLeases();
     void clearDnsSplitTunnelLeases();
@@ -68,6 +73,14 @@ private:
     QHash<QString, QHash<QString, QDateTime>> m_dnsSplitTunnelHostLeases;
     QHash<QString, QList<amnezia::DnsIpv4Answer>> m_dnsSplitTunnelHostCache;
     QTimer m_dnsSplitTunnelLeaseTimer;
+    QStringList m_dnsSplitTunnelPrewarmQueue;
+    int m_dnsSplitTunnelPrewarmGeneration = 0;
+    int m_dnsSplitTunnelPrewarmTotal = 0;
+    int m_dnsSplitTunnelPrewarmStarted = 0;
+    int m_dnsSplitTunnelPrewarmFinished = 0;
+    int m_dnsSplitTunnelPrewarmSucceeded = 0;
+    int m_dnsSplitTunnelPrewarmFailed = 0;
+    int m_dnsSplitTunnelPrewarmPending = 0;
 };
 
 #endif // ROUTERMAC_H

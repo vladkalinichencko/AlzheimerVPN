@@ -14,16 +14,19 @@ AlzheimerVPN makes those situations explicit. It keeps DNS-derived routes, bypas
 
 ### 🧭 Split Tunneling That Tracks Real Hostnames
 
-Split tunneling is built around hostnames resolving to concrete IP routes at connection time.
+The upstream client can exclude sites from the VPN, but that mostly works with static addresses and simple host resolution. AlzheimerVPN extends site split tunneling so the list can contain real web hostnames, URL-like input, and wildcard host rules while the routing layer still receives concrete IP routes.
 
 - URL-like input is reduced to the hostname that routing can actually use.
-- Domain rules are resolved on connect and reconnect.
-- Every IPv4 address returned by DNS is routed.
-- If route installation only partially succeeds, the hostname is resolved again and route installation is retried once.
-- Wildcard hostnames can be matched from observed system DNS responses on macOS.
-- DNS-observed routes follow DNS TTLs: an IP stays routed only while at least one matching hostname still has a live DNS lease for it.
+- Exact host rules are prewarmed on connect and reconnect. The daemon starts resolving the known host list immediately, without making VPN startup wait for the whole list to finish.
+- Every IPv4 address returned for a matching hostname is added as a bypass route, instead of keeping only one saved address for the site.
+- Later DNS answers are also observed. If a matching hostname resolves to more IPs while the VPN is already connected, those IPs are added to the same bypass set.
+- A newer DNS answer for the same hostname does not immediately discard older learned IPs during the current session. This avoids breaking browsers that still hold an existing connection or cached address while DNS rotates.
+- Wildcard hostnames are supported on macOS by matching observed system DNS responses. This adds support for rules such as `*.example.com`, which are not practical to represent as a fixed IP list ahead of time.
+- DNS-learned routes are cleared when split-tunnel configuration changes or the VPN session is torn down.
 
-The practical result: services with rotating DNS answers are handled as changing network targets.
+There is also an Xray-specific safety net. In `VpnAllExceptSites` mode, Xray receives the same split-domain rules and enables domain sniffing for HTTP, TLS, and QUIC. If a browser connects to an already cached IP before the DNS-route layer sees it, Xray can still recognize the hostname from SNI or HTTP Host and send that flow directly instead of proxying it through the VPN.
+
+The practical result: services with rotating DNS answers, CDN pools, and browser-side connection reuse are handled as changing network targets instead of one fixed IP captured at setup time.
 
 ### 🧯 Routes And Kill Switch Stay Together
 
@@ -57,7 +60,8 @@ This fork updates Apple-platform build and runtime glue around the current imple
 
 - URL-like split-tunneling input is normalized to a routable hostname; scheme, path, whitespace and casing no longer break a rule.
 - Domain split-tunnel rules are resolved to concrete IPv4 routes at connect time, with a single DNS re-resolution retry on partial route failure.
-- DNS-derived split-tunnel routes are refreshed from observed DNS answers and expire by DNS TTL/refcount, so rotated CDN IPs do not leave stale bypass routes behind.
+- DNS-derived split-tunnel routes are refreshed from observed DNS answers and retained for the active session, so rotated CDN IPs and browser-cached addresses do not break mid-load.
+- Xray split tunneling has a domain-routing fallback: sniffed HTTP/TLS/QUIC hostnames that match the split list are sent to a direct outbound even when the kernel route table has not learned the IP yet.
 - macOS route monitor no longer marks a route as added when the kernel route add actually failed.
 - Duplicate route add (`already exists`) is treated as success, not as a route failure.
 - Bypass route IPs and the kill-switch allow-list are kept in sync.
@@ -240,6 +244,6 @@ The useful upstream work can be reviewed in three areas.
 
 First, connection diagnostics: health states, structured failure logs, watchdog behavior, and filtering that keeps stale diagnostics out of the UI.
 
-Second, split tunneling: hostname normalization, DNS refresh on connection setup, all-IPv4 route installation, route retry planning, wildcard DNS observation, DNS TTL/refcount route expiry, and kill-switch synchronization.
+Second, split tunneling: hostname normalization, DNS prewarm on connection setup, all-IPv4 route installation, wildcard DNS observation, active-session DNS lease retention, Xray domain fallback routing, and kill-switch synchronization.
 
 Third, Apple platform support: macOS build settings, native lifecycle cleanup, configurable naming, and the daemon-side route/firewall pieces needed for reliable split tunneling.

@@ -20,7 +20,7 @@ QString getPlatformName()
     return "Android";
 #elif defined(Q_OS_LINUX)
     return "Linux";
-#elif defined(Q_OS_MACX)
+#elif defined(Q_OS_MACOS)
     return "MacOS";
 #elif defined(Q_OS_IOS)
     return "iOS";
@@ -129,7 +129,7 @@ ErrorCode SettingsController::restoreAppConfigFromData(const QByteArray &data)
 
     QJsonObject newConfigData = QJsonDocument::fromJson(data).object();
 
-#if defined(Q_OS_WINDOWS) || defined(Q_OS_LINUX) || defined(Q_OS_MACX)
+#if defined(Q_OS_WINDOWS) || defined(Q_OS_LINUX) || defined(Q_OS_MACOS)
     bool autoStart = false;
     if (newConfigData.contains("Conf/autoStart")) {
         autoStart = newConfigData["Conf/autoStart"].toBool();
@@ -363,4 +363,3 @@ QString SettingsController::nextAvailableServerName() const
 {
     return m_appSettingsRepository->nextAvailableServerName();
 }
-

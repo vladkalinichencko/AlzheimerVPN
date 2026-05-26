@@ -182,15 +182,16 @@ void DnsSplitRouteObserver::readUpstreamDatagrams()
         for (const DnsIpv4Answer &answer : answers) {
             ips.append(answer.address);
         }
+
+        if (pending.matched && !answers.isEmpty()) {
+            emit hostResolved(pending.host, answers);
+        }
+
         setMessageId(response, pending.originalId);
         m_clientSocket.writeDatagram(response, pending.clientAddress, pending.clientPort);
         logger.debug() << "DNS split response proto=udp host=" << pending.host
                        << "matched=" << (pending.matched ? "true" : "false")
                        << "ips=" << ips;
-
-        if (pending.matched && !answers.isEmpty()) {
-            emit hostResolved(pending.host, answers);
-        }
     }
 }
 

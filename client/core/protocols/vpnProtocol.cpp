@@ -4,7 +4,7 @@
 #include "core/utils/errorStrings.h"
 #include "vpnProtocol.h"
 
-#if defined(Q_OS_WINDOWS) || defined(Q_OS_MACX) and !defined MACOS_NE || (defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID))
+#if defined(Q_OS_WINDOWS) || (defined(Q_OS_MACOS) && !defined(MACOS_NE)) || (defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID))
     #include "openVpnProtocol.h"
     #include "wireGuardProtocol.h"
     #include "xrayProtocol.h"
@@ -113,7 +113,7 @@ VpnProtocol *VpnProtocol::factory(DockerContainer container, const QJsonObject &
 #if defined(Q_OS_WINDOWS)
     case DockerContainer::Ipsec: return new Ikev2Protocol(configuration);
 #endif
-#if defined(Q_OS_WINDOWS) || defined(Q_OS_MACX) and !defined MACOS_NE || (defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID))
+#if defined(Q_OS_WINDOWS) || (defined(Q_OS_MACOS) && !defined(MACOS_NE)) || (defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID))
     case DockerContainer::OpenVpn: return new OpenVpnProtocol(configuration);
     case DockerContainer::WireGuard: return new WireguardProtocol(Proto::WireGuard, configuration);
     case DockerContainer::Awg2: return new WireguardProtocol(Proto::Awg, configuration);

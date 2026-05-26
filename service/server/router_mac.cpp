@@ -6,6 +6,7 @@
 
 #include <QProcess>
 #include <QThread>
+#include <QHostInfo>
 
 #include <cerrno>
 
@@ -13,6 +14,8 @@
 #include <core/utils/splitTunnelRule.h>
 
 namespace {
+constexpr int kDnsSplitTunnelPrewarmConcurrency = 8;
+
 int runRouteCommand(const QString &cmd)
 {
     const QStringList parts = cmd.split(" ");
@@ -222,6 +225,7 @@ bool RouterMac::configureDnsSplitTunnel(const QStringList &rules, const QString 
             << "gateway=" << gw << "killswitch=" << killSwitchEnabled;
     m_dnsUtil->configureSplitTunnelRules(rules);
     seedDnsSplitTunnelLeasesFromCache(rules);
+    startDnsSplitTunnelPrewarm(rules);
     return true;
 }
 
@@ -234,22 +238,31 @@ void RouterMac::updateDnsSplitTunnelHostLeases(const QString &host, const QList<
     const QDateTime now = QDateTime::currentDateTimeUtc();
     const QSet<QString> before = m_dnsSplitTunnelIps;
 
-    QHash<QString, QDateTime> leases;
+    QHash<QString, QDateTime> leases = m_dnsSplitTunnelHostLeases.value(host);
+    QList<amnezia::DnsIpv4Answer> cachedAnswers = m_dnsSplitTunnelHostCache.value(host);
+    QSet<QString> cachedIps;
+    for (const amnezia::DnsIpv4Answer &answer : std::as_const(cachedAnswers)) {
+        cachedIps.insert(answer.address);
+    }
+
     for (const amnezia::DnsIpv4Answer &answer : answers) {
         if (!NetworkUtilities::checkIPv4Format(answer.address)) {
             continue;
         }
         const int ttl = qBound(1, answer.ttlSeconds, 86400);
         leases.insert(answer.address, now.addSecs(ttl));
+        if (!cachedIps.contains(answer.address)) {
+            cachedAnswers.append(answer);
+            cachedIps.insert(answer.address);
+        }
     }
 
     if (leases.isEmpty()) {
-        m_dnsSplitTunnelHostLeases.remove(host);
-        m_dnsSplitTunnelHostCache.remove(host);
-    } else {
-        m_dnsSplitTunnelHostLeases.insert(host, leases);
-        m_dnsSplitTunnelHostCache.insert(host, answers);
+        return;
     }
+
+    m_dnsSplitTunnelHostLeases.insert(host, leases);
+    m_dnsSplitTunnelHostCache.insert(host, cachedAnswers);
 
     syncDnsSplitTunnelIps(before, now);
     scheduleDnsSplitTunnelLeaseTimer(now);
@@ -287,6 +300,94 @@ void RouterMac::seedDnsSplitTunnelLeasesFromCache(const QStringList &rules)
         syncDnsSplitTunnelIps(before, now);
         scheduleDnsSplitTunnelLeaseTimer(now);
     }
+}
+
+void RouterMac::startDnsSplitTunnelPrewarm(const QStringList &rules)
+{
+    ++m_dnsSplitTunnelPrewarmGeneration;
+    m_dnsSplitTunnelPrewarmQueue.clear();
+    m_dnsSplitTunnelPrewarmTotal = 0;
+    m_dnsSplitTunnelPrewarmStarted = 0;
+    m_dnsSplitTunnelPrewarmFinished = 0;
+    m_dnsSplitTunnelPrewarmSucceeded = 0;
+    m_dnsSplitTunnelPrewarmFailed = 0;
+    m_dnsSplitTunnelPrewarmPending = 0;
+
+    if (m_dnsSplitTunnelGateway.isEmpty() || rules.isEmpty()) {
+        return;
+    }
+
+    for (const QString &ruleText : rules) {
+        const amnezia::SplitTunnelRule rule = amnezia::SplitTunnelRule::fromText(ruleText);
+        if (rule.isValid() && rule.type() == amnezia::SplitTunnelRule::Type::ExactHost) {
+            m_dnsSplitTunnelPrewarmQueue.append(rule.normalizedText());
+        }
+    }
+    m_dnsSplitTunnelPrewarmQueue.removeDuplicates();
+    m_dnsSplitTunnelPrewarmTotal = m_dnsSplitTunnelPrewarmQueue.count();
+
+    if (m_dnsSplitTunnelPrewarmTotal == 0) {
+        return;
+    }
+
+    qInfo() << "RouterMac::splitTunnelPrewarm start hosts=" << m_dnsSplitTunnelPrewarmTotal
+            << "concurrency=" << kDnsSplitTunnelPrewarmConcurrency;
+    pumpDnsSplitTunnelPrewarm();
+}
+
+void RouterMac::pumpDnsSplitTunnelPrewarm()
+{
+    const int generation = m_dnsSplitTunnelPrewarmGeneration;
+    while (m_dnsSplitTunnelPrewarmPending < kDnsSplitTunnelPrewarmConcurrency &&
+           !m_dnsSplitTunnelPrewarmQueue.isEmpty()) {
+        const QString host = m_dnsSplitTunnelPrewarmQueue.takeFirst();
+        ++m_dnsSplitTunnelPrewarmStarted;
+        ++m_dnsSplitTunnelPrewarmPending;
+        QHostInfo::lookupHost(host, this, [this, generation, host](const QHostInfo &info) {
+            finishDnsSplitTunnelPrewarmHost(generation, host, info);
+        });
+    }
+}
+
+void RouterMac::finishDnsSplitTunnelPrewarmHost(int generation, const QString &host, const QHostInfo &info)
+{
+    if (generation != m_dnsSplitTunnelPrewarmGeneration) {
+        return;
+    }
+
+    --m_dnsSplitTunnelPrewarmPending;
+    ++m_dnsSplitTunnelPrewarmFinished;
+
+    QList<amnezia::DnsIpv4Answer> answers;
+    for (const QHostAddress &address : info.addresses()) {
+        if (address.protocol() == QAbstractSocket::IPv4Protocol) {
+            answers.append({address.toString(), 3600});
+        }
+    }
+
+    if (answers.isEmpty()) {
+        ++m_dnsSplitTunnelPrewarmFailed;
+        qWarning() << "RouterMac::splitTunnelPrewarm failed host=" << host
+                   << "finished=" << m_dnsSplitTunnelPrewarmFinished
+                   << "total=" << m_dnsSplitTunnelPrewarmTotal
+                   << "error=" << info.errorString();
+    } else {
+        ++m_dnsSplitTunnelPrewarmSucceeded;
+        updateDnsSplitTunnelHostLeases(host, answers);
+    }
+
+    if (m_dnsSplitTunnelPrewarmFinished <= 10 ||
+        m_dnsSplitTunnelPrewarmFinished % 25 == 0 ||
+        m_dnsSplitTunnelPrewarmFinished == m_dnsSplitTunnelPrewarmTotal) {
+        qInfo() << "RouterMac::splitTunnelPrewarm progress finished="
+                << m_dnsSplitTunnelPrewarmFinished
+                << "total=" << m_dnsSplitTunnelPrewarmTotal
+                << "succeeded=" << m_dnsSplitTunnelPrewarmSucceeded
+                << "failed=" << m_dnsSplitTunnelPrewarmFailed
+                << "pending=" << m_dnsSplitTunnelPrewarmPending;
+    }
+
+    pumpDnsSplitTunnelPrewarm();
 }
 
 bool RouterMac::dnsSplitTunnelHostMatchesRules(const QString &host, const QStringList &rules) const
