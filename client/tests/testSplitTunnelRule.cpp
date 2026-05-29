@@ -19,6 +19,13 @@ private slots:
         QVERIFY(!rule.matchesHost("x.moodle.innopolis.university"));
     }
 
+    void testTrailingWhitespace()
+    {
+        const auto rule = SplitTunnelRule::fromText("imap.gmail.com\n");
+        QVERIFY(rule.isValid());
+        QCOMPARE(rule.normalizedText(), QString("imap.gmail.com"));
+    }
+
     void testWildcardDomain()
     {
         const auto rule = SplitTunnelRule::fromText("*.innodatahub.innopolis.university");

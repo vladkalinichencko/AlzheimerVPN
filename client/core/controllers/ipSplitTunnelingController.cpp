@@ -38,10 +38,26 @@ bool IpSplitTunnelingController::addSiteInternal(const QString &hostname, const 
 
 void IpSplitTunnelingController::addSites(const QMap<QString, QString> &sites, bool replaceExisting)
 {
+    QMap<QString, QString> normalizedSites;
+    for (auto it = sites.constBegin(); it != sites.constEnd(); ++it) {
+        const SplitTunnelRule rule = SplitTunnelRule::fromText(it.key());
+        const QString hostname = rule.normalizedText();
+        const QString ip = it.value().trimmed();
+
+        if (!validateHostname(hostname)) {
+            qDebug() << hostname << " not look like ip adress or domain name";
+            continue;
+        }
+
+        if (!normalizedSites.contains(hostname) || (!ip.isEmpty() && normalizedSites.value(hostname).isEmpty())) {
+            normalizedSites.insert(hostname, ip);
+        }
+    }
+
     if (replaceExisting) {
         m_sites.clear();
     }
-    for (auto it = sites.constBegin(); it != sites.constEnd(); ++it) {
+    for (auto it = normalizedSites.constBegin(); it != normalizedSites.constEnd(); ++it) {
         const QString &hostname = it.key();
         const QString &ip = it.value();
         bool found = false;
@@ -61,7 +77,7 @@ void IpSplitTunnelingController::addSites(const QMap<QString, QString> &sites, b
     if (replaceExisting) {
         m_appSettingsRepository->removeAllVpnSites(m_currentRouteMode);
     }
-    m_appSettingsRepository->addVpnSites(m_currentRouteMode, sites);
+    m_appSettingsRepository->addVpnSites(m_currentRouteMode, normalizedSites);
 }
 
 bool IpSplitTunnelingController::addSite(const QString &hostname)
@@ -134,9 +150,32 @@ QVector<QPair<QString, QString>> IpSplitTunnelingController::getCurrentSites() c
 void IpSplitTunnelingController::fillSites()
 {
     QVariantMap sitesMap = m_appSettingsRepository->vpnSites(m_currentRouteMode);
+    QVariantMap normalizedSitesMap;
     m_sites.clear();
     for (auto it = sitesMap.begin(); it != sitesMap.end(); ++it) {
+        const SplitTunnelRule rule = SplitTunnelRule::fromText(it.key());
+        const QString hostname = rule.normalizedText();
+        const QString ip = it.value().toString().trimmed();
+
+        if (!validateHostname(hostname)) {
+            qDebug() << hostname << " not look like ip adress or domain name";
+            continue;
+        }
+
+        if (!normalizedSitesMap.contains(hostname) || (!ip.isEmpty() && normalizedSitesMap.value(hostname).toString().isEmpty())) {
+            normalizedSitesMap.insert(hostname, ip);
+        }
+    }
+    for (auto it = normalizedSitesMap.begin(); it != normalizedSitesMap.end(); ++it) {
         m_sites.append(qMakePair(it.key(), it.value().toString()));
+    }
+    if (normalizedSitesMap != sitesMap) {
+        QMap<QString, QString> normalizedSites;
+        for (auto it = normalizedSitesMap.begin(); it != normalizedSitesMap.end(); ++it) {
+            normalizedSites.insert(it.key(), it.value().toString());
+        }
+        m_appSettingsRepository->removeAllVpnSites(m_currentRouteMode);
+        m_appSettingsRepository->addVpnSites(m_currentRouteMode, normalizedSites);
     }
 }
 
