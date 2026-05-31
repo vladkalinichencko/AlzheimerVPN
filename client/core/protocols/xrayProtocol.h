@@ -38,6 +38,7 @@ private:
     // Guards re-entrancy: tun2socks::finished can be re-emitted from a queued
     // metacall while stop() is already running, otherwise stop() recurses.
     bool m_stopping = false;
+    bool m_stopRequested = false;
 };
 
 #endif // XRAYPROTOCOL_H

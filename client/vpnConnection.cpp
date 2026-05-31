@@ -552,20 +552,24 @@ void VpnConnection::connectToVpn(int serverIndex, DockerContainer container, con
 
     appendSplitTunnelingConfig();
 
+    QSharedPointer<VpnProtocol> protocol;
+
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && !defined(MACOS_NE)
-    m_vpnProtocol.reset(VpnProtocol::factory(container, m_vpnConfiguration));
-    if (!m_vpnProtocol) {
+    protocol.reset(VpnProtocol::factory(container, m_vpnConfiguration));
+    m_vpnProtocol = protocol;
+    if (!protocol) {
         markLastError(ErrorCode::InternalError);
         setConnectionState(Vpn::ConnectionState::Error);
         emit vpnProtocolError(ErrorCode::InternalError);
         return;
     }
-    m_vpnProtocol->prepare();
+    protocol->prepare();
 #elif defined Q_OS_ANDROID
     androidVpnProtocol = createDefaultAndroidVpnProtocol();
     createAndroidConnections();
 
     m_vpnProtocol.reset(androidVpnProtocol);
+    protocol = m_vpnProtocol;
 #elif defined Q_OS_IOS || defined(MACOS_NE)
     Proto proto = ContainerUtils::defaultProtocol(container);
     IosController::Instance()->connectVpn(proto, m_vpnConfiguration);
@@ -575,7 +579,10 @@ void VpnConnection::connectToVpn(int serverIndex, DockerContainer container, con
 
     createProtocolConnections();
 
-    if (ErrorCode err = m_vpnProtocol->start(); err != ErrorCode::NoError) {
+    if (ErrorCode err = protocol->start(); err != ErrorCode::NoError) {
+        if (m_vpnProtocol != protocol) {
+            return;
+        }
         markLastError(err);
         setConnectionHealth(ConnectionHealth::ProtocolStartFailed);
         setConnectionState(Vpn::ConnectionState::Error);
@@ -583,6 +590,9 @@ void VpnConnection::connectToVpn(int serverIndex, DockerContainer container, con
         return;
     }
 
+    if (m_vpnProtocol != protocol) {
+        return;
+    }
     setConnectionHealth(ConnectionHealth::WaitingHandshake);
 }
 
@@ -801,8 +811,9 @@ void VpnConnection::reconnectToVpn() {
     disconnect(m_vpnProtocol.data(), &VpnProtocol::connectionStateChanged, this, &VpnConnection::setConnectionState);
     disconnect(m_vpnProtocol.data(), SIGNAL(bytesChanged(quint64, quint64)), this, SLOT(onBytesChanged(quint64, quint64)));
     m_vpnProtocol->stop();
-    m_vpnProtocol.reset(VpnProtocol::factory(m_currentContainer, m_vpnConfiguration));
-    if (!m_vpnProtocol) {
+    QSharedPointer<VpnProtocol> protocol(VpnProtocol::factory(m_currentContainer, m_vpnConfiguration));
+    m_vpnProtocol = protocol;
+    if (!protocol) {
         m_silentReconnectInProgress = false;
         markLastError(ErrorCode::InternalError);
         setConnectionHealth(ConnectionHealth::ProtocolStartFailed);
@@ -812,7 +823,10 @@ void VpnConnection::reconnectToVpn() {
     }
     createProtocolConnections();
 
-    if (ErrorCode err = m_vpnProtocol->start(); err != ErrorCode::NoError) {
+    if (ErrorCode err = protocol->start(); err != ErrorCode::NoError) {
+        if (m_vpnProtocol != protocol) {
+            return;
+        }
         m_silentReconnectInProgress = false;
         markLastError(err);
         setConnectionHealth(ConnectionHealth::ProtocolStartFailed);
@@ -821,6 +835,9 @@ void VpnConnection::reconnectToVpn() {
         return;
     }
 
+    if (m_vpnProtocol != protocol) {
+        return;
+    }
     setConnectionHealth(ConnectionHealth::WaitingHandshake);
 }
 

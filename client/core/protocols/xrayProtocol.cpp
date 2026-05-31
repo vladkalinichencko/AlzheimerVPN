@@ -165,6 +165,7 @@ XrayProtocol::~XrayProtocol()
 ErrorCode XrayProtocol::start()
 {
     qDebug() << "XrayProtocol::start()";
+    m_stopRequested = false;
 
     // Inject SOCKS5 auth into the inbound before starting xray.
     // Re-uses existing credentials if the config already has them (e.g. imported config).
@@ -203,6 +204,10 @@ ErrorCode XrayProtocol::start()
                                 << finished << ", returnValue=" << returned << ")";
                     return ErrorCode::XrayExecutableCrashed;
                 }
+                if (m_stopRequested) {
+                    qInfo() << "XrayProtocol::start: stop requested while xrayStart was pending";
+                    return ErrorCode::NoError;
+                }
                 const ErrorCode tunResult = startTun2Socks();
                 qInfo() << "XrayProtocol::start: startTun2Socks returned" << static_cast<int>(tunResult);
                 return tunResult;
@@ -216,6 +221,7 @@ ErrorCode XrayProtocol::start()
 void XrayProtocol::stop()
 {
     qDebug() << "XrayProtocol::stop()";
+    m_stopRequested = true;
 
     // Idempotent: re-entering stop() (e.g. from a queued tun2socks finished
     // signal arriving while we're tearing down) used to recurse via
