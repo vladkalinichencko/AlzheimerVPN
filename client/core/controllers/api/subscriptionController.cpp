@@ -56,6 +56,30 @@ QString getSubscriptionStatusForRenewal(const ApiConfig &apiConfig)
 
     return QStringLiteral("active");
 }
+
+bool isConfigRefreshTransportError(ErrorCode errorCode)
+{
+    switch (errorCode) {
+    case ErrorCode::ApiConfigDownloadError:
+    case ErrorCode::ApiConfigTimeoutError:
+    case ErrorCode::ApiConfigSslError:
+    case ErrorCode::ApiConfigDecryptionError:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool hasUsableCachedConfig(const ApiV2ServerConfig *apiV2)
+{
+    if (!apiV2 || apiV2->defaultContainer == DockerContainer::None
+        || !apiV2->containers.contains(apiV2->defaultContainer)) {
+        return false;
+    }
+
+    const ContainerConfig containerConfig = apiV2->containerConfig(apiV2->defaultContainer);
+    return containerConfig.protocolConfig.hasClientConfig();
+}
 }
 
 
@@ -452,6 +476,16 @@ ErrorCode SubscriptionController::updateServiceFromGateway(int serverIndex, cons
                 m_serversRepository->editServer(serverIndex, expiredServerConfig);
             }
         }
+
+        if (isConnectEvent && isConfigRefreshTransportError(errorCode) && hasUsableCachedConfig(apiV2)) {
+            qWarning().noquote() << "AmneziaDiagnostic event=api_config_cache_fallback"
+                                 << "server_index=" << serverIndex
+                                 << "error_code=" << static_cast<int>(errorCode)
+                                 << "service_protocol=" << serviceProtocol
+                                 << "default_container=" << ContainerUtils::containerToString(apiV2->defaultContainer);
+            return ErrorCode::NoError;
+        }
+
         return errorCode;
     }
 

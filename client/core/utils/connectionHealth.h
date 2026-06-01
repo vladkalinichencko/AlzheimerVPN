@@ -32,6 +32,8 @@ enum ConnectionHealth {
     BackendFailed,
     LocalNetworkUnavailable,
     ApiUnavailable,
+    ApiSslError,
+    ApiDecryptionFailed,
     LocalServiceUnavailable,
     ProtocolStartFailed,
     TunnelInterfaceMissing,

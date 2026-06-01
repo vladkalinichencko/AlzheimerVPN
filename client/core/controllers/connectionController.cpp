@@ -202,6 +202,10 @@ ConnectionHealth ConnectionController::diagnosticForConnectionError(ErrorCode er
     case ErrorCode::ApiConfigTimeoutError:
     case ErrorCode::ApiUpdateRequestError:
         return ConnectionHealth::ApiUnavailable;
+    case ErrorCode::ApiConfigSslError:
+        return ConnectionHealth::ApiSslError;
+    case ErrorCode::ApiConfigDecryptionError:
+        return ConnectionHealth::ApiDecryptionFailed;
     case ErrorCode::VpnHandshakeTimeout:
         return ConnectionHealth::HandshakeTimeout;
     case ErrorCode::VpnNoTrafficError:

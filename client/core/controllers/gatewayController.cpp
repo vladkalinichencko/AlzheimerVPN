@@ -12,6 +12,7 @@
 #include <QNetworkReply>
 #include <QPromise>
 #include <QScopedPointer>
+#include <QSslError>
 #include <QThread>
 #include <QUrl>
 
@@ -81,6 +82,46 @@ namespace
             << "has_uuid=" + QString(apiPayload.contains(apiDefs::key::uuid) ? "true" : "false")
             << "has_api_key=" + QString(apiPayload.contains(apiDefs::key::apiKey) ? "true" : "false")
             << "is_connect_event=" + QString(apiPayload.value(apiDefs::key::isConnectEvent).toBool(false) ? "true" : "false");
+    }
+
+    QString sslErrorsText(const QList<QSslError> &sslErrors)
+    {
+        QStringList errors;
+        for (const QSslError &error : sslErrors) {
+            errors << error.errorString();
+        }
+        return errors.join(QStringLiteral(" | ")).left(500);
+    }
+
+    void logGatewayPrepared(const QString &endpoint, const QNetworkRequest &request, int requestBytes)
+    {
+        qInfo().noquote()
+            << "AmneziaDiagnostic event=api_request_prepared"
+            << "endpoint_template=" + endpoint
+            << "url_host=" + request.url().host()
+            << "url_path=" + request.url().path()
+            << "request_bytes=" + QString::number(requestBytes)
+            << "request_id=" + QString::fromUtf8(request.rawHeader("X-Client-Request-ID"));
+    }
+
+    void logGatewayResponse(const QString &stage, const QString &endpoint, const QUrl &url,
+                            QNetworkReply::NetworkError replyError, const QString &replyErrorString, int httpStatusCode,
+                            const QList<QSslError> &sslErrors, int encryptedBytes, bool decrypted, int decryptedBytes)
+    {
+        qInfo().noquote()
+            << "AmneziaDiagnostic event=api_response"
+            << "stage=" + stage
+            << "endpoint_template=" + endpoint
+            << "url_host=" + url.host()
+            << "url_path=" + url.path()
+            << "http_status=" + QString::number(httpStatusCode)
+            << "reply_error=" + QString::number(static_cast<int>(replyError))
+            << "reply_error_text=" + replyErrorString
+            << "ssl_error_count=" + QString::number(sslErrors.size())
+            << "ssl_errors=" + sslErrorsText(sslErrors)
+            << "encrypted_bytes=" + QString::number(encryptedBytes)
+            << "decrypted=" + QString(decrypted ? "true" : "false")
+            << "decrypted_bytes=" + QString::number(decryptedBytes);
     }
 
     QStringList buildProxyStorageUrls(bool isDevEnvironment, const QString &serviceType, const QString &userCountryCode)
@@ -205,6 +246,7 @@ GatewayController::EncryptedRequestData GatewayController::prepareRequest(const 
     requestBody[apiDefs::key::apiPayload] = QString(encryptedApiPayload.toBase64());
 
     encRequestData.requestBody = QJsonDocument(requestBody).toJson();
+    logGatewayPrepared(endpoint, encRequestData.request, encRequestData.requestBody.size());
     return encRequestData;
 }
 
@@ -249,7 +291,7 @@ ErrorCode GatewayController::post(const QString &endpoint, const QJsonObject api
     };
 
     auto replyProcessingFunction = [&encryptedResponseBody, &replyErrorString, &replyError, &httpStatusCode, &sslErrors, &encRequestData,
-                                    &decryptionResult, this](QNetworkReply *reply, const QList<QSslError> &nestedSslErrors) {
+                                    &decryptionResult, endpoint, this](QNetworkReply *reply, const QList<QSslError> &nestedSslErrors) {
         encryptedResponseBody = reply->readAll();
         replyErrorString = QString("%1 url=%2").arg(reply->errorString(), reply->url().toString());
         replyError = reply->error();
@@ -259,6 +301,8 @@ ErrorCode GatewayController::post(const QString &endpoint, const QJsonObject api
                 tryDecryptResponseBody(encryptedResponseBody, replyError, encRequestData.key, encRequestData.iv, encRequestData.salt);
 
         sslErrors = nestedSslErrors;
+        logGatewayResponse(QStringLiteral("sync"), endpoint, reply->url(), replyError, replyErrorString, httpStatusCode, sslErrors,
+                           encryptedResponseBody.size(), decryptionResult.isDecryptionSuccessful, decryptionResult.decryptedBody.size());
         return sslErrors.isEmpty()
                && !shouldBypassProxy(replyError, decryptionResult.decryptedBody, decryptionResult.isDecryptionSuccessful);
     };
@@ -273,6 +317,11 @@ ErrorCode GatewayController::post(const QString &endpoint, const QJsonObject api
                 });
 
     if (!proxySucceeded) {
+        const QUrl directUrl = QUrl(endpoint.arg(m_gatewayEndpoint));
+        qInfo().noquote()
+            << "AmneziaDiagnostic event=api_direct_fallback"
+            << "endpoint_template=" + endpoint
+            << "url_host=" + directUrl.host();
         QNetworkReply *reply = requestFunction(endpoint.arg(m_gatewayEndpoint));
 
         QEventLoop wait;
@@ -291,6 +340,12 @@ ErrorCode GatewayController::post(const QString &endpoint, const QJsonObject api
     }
 
     if (!decryptionResult.isDecryptionSuccessful) {
+        qWarning().noquote()
+            << "AmneziaDiagnostic event=api_decrypt_failure"
+            << "endpoint_template=" + endpoint
+            << "reply_error=" + QString::number(static_cast<int>(replyError))
+            << "http_status=" + QString::number(httpStatusCode)
+            << "encrypted_bytes=" + QString::number(encryptedResponseBody.size());
         qCritical() << "error when decrypting the request body";
         return ErrorCode::ApiConfigDecryptionError;
     }
@@ -324,6 +379,11 @@ QFuture<QPair<ErrorCode, QByteArray>> GatewayController::postAsync(const QString
         }
 
         if (!decryptionResult.isDecryptionSuccessful) {
+            qWarning().noquote()
+                << "AmneziaDiagnostic event=api_decrypt_failure"
+                << "reply_error=" + QString::number(static_cast<int>(replyError))
+                << "http_status=" + QString::number(httpStatusCode)
+                << "decrypted_bytes=" + QString::number(decryptionResult.decryptedBody.size());
             Utils::logException();
             qCritical() << "error when decrypting the request body";
             promise->addResult(qMakePair(ErrorCode::ApiConfigDecryptionError, QByteArray()));
@@ -336,18 +396,26 @@ QFuture<QPair<ErrorCode, QByteArray>> GatewayController::postAsync(const QString
     };
 
     auto sendDirect = [this, endpoint, encRequestData, processResponse]() mutable {
+        qInfo().noquote()
+            << "AmneziaDiagnostic event=api_direct_fallback"
+            << "endpoint_template=" + endpoint
+            << "url_host=" + encRequestData.request.url().host();
         QNetworkReply *reply = networkManagerForCurrentThread()->post(encRequestData.request, encRequestData.requestBody);
         auto sslErrors = QSharedPointer<QList<QSslError>>::create();
         connect(reply, &QNetworkReply::sslErrors, [sslErrors](const QList<QSslError> &errors) { *sslErrors = errors; });
-        connect(reply, &QNetworkReply::finished, reply, [this, reply, sslErrors, encRequestData, processResponse]() mutable {
+        connect(reply, &QNetworkReply::finished, reply, [this, reply, sslErrors, encRequestData, endpoint, processResponse]() mutable {
             QByteArray encryptedResponseBody = reply->readAll();
             QString replyErrorString = QString("%1 url=%2").arg(reply->errorString(), reply->url().toString());
+            QUrl replyUrl = reply->url();
             auto replyError = reply->error();
             int httpStatusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             reply->deleteLater();
 
             auto decryptionResult =
                     tryDecryptResponseBody(encryptedResponseBody, replyError, encRequestData.key, encRequestData.iv, encRequestData.salt);
+            logGatewayResponse(QStringLiteral("async-direct"), endpoint, replyUrl, replyError, replyErrorString, httpStatusCode,
+                               *sslErrors, encryptedResponseBody.size(), decryptionResult.isDecryptionSuccessful,
+                               decryptionResult.decryptedBody.size());
             processResponse(decryptionResult, *sslErrors, replyError, replyErrorString, httpStatusCode);
         });
     };
@@ -465,6 +533,11 @@ bool GatewayController::shouldBypassProxy(const QNetworkReply::NetworkError &rep
     if (replyError == QNetworkReply::NetworkError::OperationCanceledError || replyError == QNetworkReply::NetworkError::TimeoutError) {
         qDebug() << "timeout occurred";
         qDebug() << replyError;
+        qInfo().noquote()
+            << "AmneziaDiagnostic event=api_proxy_decision"
+            << "decision=try_next_proxy"
+            << "reason=timeout"
+            << "reply_error=" + QString::number(static_cast<int>(replyError));
         return true;
     }
 
@@ -477,11 +550,21 @@ bool GatewayController::shouldBypassProxy(const QNetworkReply::NetworkError &rep
         }
     } else {
         qDebug() << "failed to decrypt the data";
+        qInfo().noquote()
+            << "AmneziaDiagnostic event=api_proxy_decision"
+            << "decision=try_next_proxy"
+            << "reason=decrypt_failed"
+            << "reply_error=" + QString::number(static_cast<int>(replyError))
+            << "response_bytes=" + QString::number(responseBody.size());
         return true;
     }
 
     if (responseBody.contains("html")) {
         qDebug() << "the response contains an html tag";
+        qInfo().noquote()
+            << "AmneziaDiagnostic event=api_proxy_decision"
+            << "decision=try_next_proxy"
+            << "reason=html_response";
         return true;
     } 
     if (apiHttpStatus == httpStatusCodeNotFound) {
@@ -512,8 +595,17 @@ bool GatewayController::shouldBypassProxy(const QNetworkReply::NetworkError &rep
     } 
     if (replyError != QNetworkReply::NetworkError::NoError) {
         qDebug() << replyError;
+        qInfo().noquote()
+            << "AmneziaDiagnostic event=api_proxy_decision"
+            << "decision=try_next_proxy"
+            << "reason=network_error"
+            << "reply_error=" + QString::number(static_cast<int>(replyError));
         return true;
     }
+    qInfo().noquote()
+        << "AmneziaDiagnostic event=api_proxy_decision"
+        << "decision=accept_response"
+        << "reply_error=" + QString::number(static_cast<int>(replyError));
     return false;
 }
 
@@ -522,6 +614,12 @@ void GatewayController::bypassProxy(const QString &endpoint, const QString &serv
                                     std::function<bool(QNetworkReply *reply, const QList<QSslError> &sslErrors)> replyProcessingFunction)
 {
     QStringList proxyUrls = getProxyUrls(serviceType, userCountryCode);
+    qInfo().noquote()
+        << "AmneziaDiagnostic event=api_proxy_list"
+        << "endpoint_template=" + endpoint
+        << "proxy_count=" + QString::number(proxyUrls.size())
+        << "service_type=" + serviceType
+        << "user_country=" + userCountryCode;
     std::random_device randomDevice;
     std::mt19937 generator(randomDevice());
     std::shuffle(proxyUrls.begin(), proxyUrls.end(), generator);
@@ -536,6 +634,11 @@ void GatewayController::bypassProxy(const QString &endpoint, const QString &serv
 
         qDebug() << "go to the next proxy endpoint";
         QNetworkReply *reply = requestFunction(endpoint.arg(proxyUrl));
+        qInfo().noquote()
+            << "AmneziaDiagnostic event=api_proxy_attempt"
+            << "endpoint_template=" + endpoint
+            << "url_host=" + reply->url().host()
+            << "url_path=" + reply->url().path();
 
         QObject::connect(reply, &QNetworkReply::finished, &wait, &QEventLoop::quit);
         connect(reply, &QNetworkReply::sslErrors, [this, &sslErrors](const QList<QSslError> &errors) { sslErrors = errors; });
@@ -558,12 +661,20 @@ void GatewayController::bypassProxy(const QString &endpoint, const QString &serv
         for (const QString &proxyUrl : proxyUrls) {
             request.setUrl(proxyUrl + "lmbd-health");
             reply = networkManagerForCurrentThread()->get(request);
+            qInfo().noquote()
+                << "AmneziaDiagnostic event=api_proxy_health_attempt"
+                << "url_host=" + request.url().host()
+                << "url_path=" + request.url().path();
 
             connect(reply, &QNetworkReply::finished, &wait, &QEventLoop::quit);
             connect(reply, &QNetworkReply::sslErrors, [this, &sslErrors](const QList<QSslError> &errors) { sslErrors = errors; });
             wait.exec(QEventLoop::ExcludeUserInputEvents);
 
             if (reply->error() == QNetworkReply::NetworkError::NoError) {
+                qInfo().noquote()
+                    << "AmneziaDiagnostic event=api_proxy_health_result"
+                    << "url_host=" + reply->url().host()
+                    << "reply_error=0";
                 reply->deleteLater();
 
                 m_proxyUrl = proxyUrl;
@@ -571,6 +682,11 @@ void GatewayController::bypassProxy(const QString &endpoint, const QString &serv
                     break;
                 }
             } else {
+                qInfo().noquote()
+                    << "AmneziaDiagnostic event=api_proxy_health_result"
+                    << "url_host=" + reply->url().host()
+                    << "reply_error=" + QString::number(static_cast<int>(reply->error()))
+                    << "reply_error_text=" + reply->errorString();
                 reply->deleteLater();
             }
         }
@@ -631,6 +747,10 @@ void GatewayController::getProxyUrlsAsync(const QStringList proxyStorageUrls, co
         request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
         request.setUrl(storageUrl);
 
+        qInfo().noquote()
+            << "AmneziaDiagnostic event=api_proxy_storage_attempt"
+            << "url_host=" + request.url().host()
+            << "url_path=" + request.url().path();
         QNetworkReply *reply = networkManagerForCurrentThread()->get(request);
         state->replies.append(reply);
 
@@ -642,6 +762,11 @@ void GatewayController::getProxyUrlsAsync(const QStringList proxyStorageUrls, co
             state->finishedCount++;
 
             const bool replyOk = (reply->error() == QNetworkReply::NoError);
+            qInfo().noquote()
+                << "AmneziaDiagnostic event=api_proxy_storage_result"
+                << "url_host=" + reply->url().host()
+                << "reply_error=" + QString::number(static_cast<int>(reply->error()))
+                << "reply_error_text=" + reply->errorString();
             QByteArray encrypted = replyOk ? reply->readAll() : QByteArray();
             reply->deleteLater();
 
@@ -727,6 +852,10 @@ void GatewayController::getProxyUrlAsync(const QStringList proxyUrls, const int 
         request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
         request.setUrl(proxyUrl + "lmbd-health");
 
+        qInfo().noquote()
+            << "AmneziaDiagnostic event=api_proxy_health_attempt"
+            << "url_host=" + request.url().host()
+            << "url_path=" + request.url().path();
         QNetworkReply *reply = networkManagerForCurrentThread()->get(request);
         state->replies.append(reply);
 
@@ -737,6 +866,11 @@ void GatewayController::getProxyUrlAsync(const QStringList proxyUrls, const int 
             }
             state->finishedCount++;
             const bool replyOk = (reply->error() == QNetworkReply::NoError);
+            qInfo().noquote()
+                << "AmneziaDiagnostic event=api_proxy_health_result"
+                << "url_host=" + reply->url().host()
+                << "reply_error=" + QString::number(static_cast<int>(reply->error()))
+                << "reply_error_text=" + reply->errorString();
             reply->deleteLater();
 
             if (replyOk) {
@@ -764,11 +898,16 @@ void GatewayController::bypassProxyAsync(
     QNetworkRequest request = encRequestData.request;
     request.setUrl(endpoint.arg(proxyUrl));
 
+    qInfo().noquote()
+        << "AmneziaDiagnostic event=api_proxy_attempt"
+        << "endpoint_template=" + endpoint
+        << "url_host=" + request.url().host()
+        << "url_path=" + request.url().path();
     QNetworkReply *reply = networkManagerForCurrentThread()->post(request, encRequestData.requestBody);
 
     connect(reply, &QNetworkReply::sslErrors, this, [sslErrors](const QList<QSslError> &errors) { *sslErrors = errors; });
 
-    connect(reply, &QNetworkReply::finished, this, [sslErrors, onComplete, encRequestData, reply, this]() {
+    connect(reply, &QNetworkReply::finished, this, [sslErrors, onComplete, encRequestData, endpoint, reply, this]() {
         QByteArray encryptedResponseBody = reply->readAll();
         QString replyErrorString = QString("%1 url=%2").arg(reply->errorString(), reply->url().toString());
         auto replyError = reply->error();
@@ -778,6 +917,9 @@ void GatewayController::bypassProxyAsync(
 
         auto decryptionResult =
                 tryDecryptResponseBody(encryptedResponseBody, replyError, encRequestData.key, encRequestData.iv, encRequestData.salt);
+        logGatewayResponse(QStringLiteral("async-proxy"), endpoint, reply->url(), replyError, replyErrorString, httpStatusCode,
+                           *sslErrors, encryptedResponseBody.size(), decryptionResult.isDecryptionSuccessful,
+                           decryptionResult.decryptedBody.size());
 
         onComplete(decryptionResult.decryptedBody, decryptionResult.isDecryptionSuccessful, *sslErrors, replyError, replyErrorString,
                    httpStatusCode);

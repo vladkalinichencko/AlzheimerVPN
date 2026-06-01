@@ -64,6 +64,10 @@ QString connectionHealthText(ConnectionHealth health)
         return QObject::tr("Internet connection is unavailable");
     case ConnectionHealth::ApiUnavailable:
         return QObject::tr("Amnezia API is not responding");
+    case ConnectionHealth::ApiSslError:
+        return QObject::tr("Amnezia API SSL error");
+    case ConnectionHealth::ApiDecryptionFailed:
+        return QObject::tr("Failed to decrypt Amnezia API response");
     case ConnectionHealth::ProtocolStartFailed:
         return QObject::tr("VPN protocol failed to start");
     case ConnectionHealth::TunnelInterfaceMissing:
@@ -99,6 +103,8 @@ bool connectionHealthProblem(ConnectionHealth health)
     case ConnectionHealth::BackendFailed:
     case ConnectionHealth::LocalNetworkUnavailable:
     case ConnectionHealth::ApiUnavailable:
+    case ConnectionHealth::ApiSslError:
+    case ConnectionHealth::ApiDecryptionFailed:
     case ConnectionHealth::LocalServiceUnavailable:
     case ConnectionHealth::ProtocolStartFailed:
     case ConnectionHealth::TunnelInterfaceMissing:
