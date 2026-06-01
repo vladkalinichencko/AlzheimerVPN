@@ -57,15 +57,22 @@ void DnsSplitRouteObserver::setRules(const QStringList &rules)
                    << "active_host_rules=" << QString::number(m_rules.size());
 }
 
-bool DnsSplitRouteObserver::start(const QList<QHostAddress> &upstreamServers)
+bool DnsSplitRouteObserver::start(const QList<QHostAddress> &upstreamServers,
+                                  const QList<QHostAddress> &matchedUpstreamServers)
 {
     stop();
 
-    for (const QHostAddress &server : upstreamServers) {
-        if (server.protocol() == QAbstractSocket::IPv4Protocol && server != QHostAddress::LocalHost) {
-            m_upstreamServers.append(server);
+    auto appendUsableServers = [](const QList<QHostAddress> &servers, QList<QHostAddress> &target) {
+        for (const QHostAddress &server : servers) {
+            if (server.protocol() == QAbstractSocket::IPv4Protocol &&
+                server != QHostAddress::LocalHost && !target.contains(server)) {
+                target.append(server);
+            }
         }
-    }
+    };
+
+    appendUsableServers(upstreamServers, m_upstreamServers);
+    appendUsableServers(matchedUpstreamServers, m_matchedUpstreamServers);
 
     if (m_rules.isEmpty() || m_upstreamServers.isEmpty()) {
         logger.debug() << "DNS split observer not started rules="
@@ -91,6 +98,7 @@ bool DnsSplitRouteObserver::start(const QList<QHostAddress> &upstreamServers)
 
     logger.debug() << "DNS split observer started rules=" << QString::number(m_rules.size())
                    << "upstreams=" << addressStrings(m_upstreamServers)
+                   << "matched_upstreams=" << addressStrings(m_matchedUpstreamServers)
                    << "udp_forward_port=" << QString::number(m_upstreamSocket.localPort());
     return true;
 }
@@ -100,6 +108,7 @@ void DnsSplitRouteObserver::stop()
     m_clientSocket.close();
     m_upstreamSocket.close();
     m_upstreamServers.clear();
+    m_matchedUpstreamServers.clear();
     m_pendingQueries.clear();
 }
 
@@ -137,10 +146,14 @@ void DnsSplitRouteObserver::readClientDatagrams()
         pending.requestKey = request;
         setMessageId(pending.requestKey, 0);
         pending.matched = matchesRules(host);
+        const QList<QHostAddress> upstreams = pending.matched && !m_matchedUpstreamServers.isEmpty()
+                ? m_matchedUpstreamServers
+                : m_upstreamServers;
         logger.debug() << "DNS split query proto=udp host=" << host
                        << "matched=" << (pending.matched ? "true" : "false")
-                       << "upstream_count=" << QString::number(m_upstreamServers.size());
-        for (const QHostAddress &upstream : m_upstreamServers) {
+                       << "upstream_count=" << QString::number(upstreams.size())
+                       << "matched_upstream=" << (pending.matched && !m_matchedUpstreamServers.isEmpty() ? "true" : "false");
+        for (const QHostAddress &upstream : upstreams) {
             QByteArray forwardedRequest = request;
             const quint16 forwardedId = nextQueryId();
             setMessageId(forwardedRequest, forwardedId);

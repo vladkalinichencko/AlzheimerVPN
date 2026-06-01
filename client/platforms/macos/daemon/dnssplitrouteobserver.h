@@ -18,7 +18,8 @@ public:
     explicit DnsSplitRouteObserver(QObject *parent = nullptr);
 
     void setRules(const QStringList &rules);
-    bool start(const QList<QHostAddress> &upstreamServers);
+    bool start(const QList<QHostAddress> &upstreamServers,
+               const QList<QHostAddress> &matchedUpstreamServers);
     void stop();
     bool isActive() const;
 
@@ -45,6 +46,7 @@ private:
     QUdpSocket m_clientSocket;
     QUdpSocket m_upstreamSocket;
     QList<QHostAddress> m_upstreamServers;
+    QList<QHostAddress> m_matchedUpstreamServers;
     QList<amnezia::SplitTunnelRule> m_rules;
     QHash<quint16, PendingQuery> m_pendingQueries;
     quint16 m_nextQueryId = 1;

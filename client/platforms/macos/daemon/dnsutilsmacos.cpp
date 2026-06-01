@@ -8,6 +8,7 @@
 #include <systemconfiguration/scpreferences.h>
 
 #include <QScopeGuard>
+#include <QAbstractSocket>
 #include <QProcess>
 
 #include "leakdetector.h"
@@ -32,6 +33,15 @@ void flushSystemDns()
           QStringList() << QStringLiteral("-HUP") << QStringLiteral("mDNSResponder"));
   p.waitForFinished();
   logger.debug() << "OUTPUT killall -HUP mDNSResponder:" << p.readAll();
+}
+
+QStringList addressStrings(const QList<QHostAddress>& addresses)
+{
+  QStringList result;
+  for (const QHostAddress& address : addresses) {
+    result.append(address.toString());
+  }
+  return result;
 }
 }
 
@@ -168,9 +178,11 @@ bool DnsUtilsMacos::updateResolvers(const QString& ifname,
     resolverList.append(addr.toString());
   }
 
-  if (m_splitRouteObserver.start(resolvers)) {
+  const QList<QHostAddress> matchedResolvers = backedUpResolvers();
+  if (m_splitRouteObserver.start(resolvers, matchedResolvers)) {
     logger.debug() << "DNS split route observer enabled with upstream resolvers"
-                   << resolverList;
+                   << resolverList
+                   << "matched upstream resolvers" << addressStrings(matchedResolvers);
     resolverList = QStringList{QStringLiteral("127.0.0.1")};
   } else {
     m_splitRouteObserver.stop();
@@ -250,6 +262,20 @@ bool DnsUtilsMacos::restoreResolvers() {
   m_prevServices.clear();
   removeStaleLocalResolverOverrides();
   return true;
+}
+
+QList<QHostAddress> DnsUtilsMacos::backedUpResolvers() const {
+  QList<QHostAddress> result;
+  for (const DnsBackup& backup : m_prevServices) {
+    for (const QString& server : backup.m_servers) {
+      const QHostAddress address(server);
+      if (address.protocol() == QAbstractSocket::IPv4Protocol &&
+          address != QHostAddress::LocalHost && !result.contains(address)) {
+        result.append(address);
+      }
+    }
+  }
+  return result;
 }
 
 void DnsUtilsMacos::backupService(const QString& uuid) {
