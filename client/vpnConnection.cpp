@@ -40,13 +40,18 @@
 
 using namespace ProtocolUtils;
 
+namespace {
+constexpr int kMaxConnectedRecoveryAttempts = 3;
+}
+
 VpnConnection::VpnConnection(SecureServersRepository* serversRepository, SecureAppSettingsRepository* appSettingsRepository, QObject *parent)
     : QObject(parent),
       m_serversRepository(serversRepository),
       m_appSettingsRepository(appSettingsRepository),
       m_checkTimer(this),
       m_connectingTimer(this),
-      m_healthTimer(this)
+      m_healthTimer(this),
+      m_connectedRecoveryTimer(this)
 {
     m_connectingTimer.setSingleShot(true);
     m_connectingTimer.setInterval(30000);
@@ -54,6 +59,18 @@ VpnConnection::VpnConnection(SecureServersRepository* serversRepository, SecureA
 
     m_healthTimer.setInterval(3000);
     connect(&m_healthTimer, &QTimer::timeout, this, &VpnConnection::checkConnectedHealth);
+
+    m_connectedRecoveryTimer.setSingleShot(true);
+    m_connectedRecoveryTimer.setInterval(1000);
+    connect(&m_connectedRecoveryTimer, &QTimer::timeout, this, [this]() {
+        if (m_connectionState != Vpn::ConnectionState::Connected ||
+            m_silentReconnectInProgress ||
+            m_vpnProtocol.isNull() ||
+            m_currentServerIndex < 0) {
+            return;
+        }
+        reconnectToVpn();
+    });
 
     m_dnsFlushDebounce.setSingleShot(true);
     m_dnsFlushDebounce.setInterval(500);
@@ -90,7 +107,9 @@ void VpnConnection::onBytesChanged(quint64 receivedBytes, quint64 sentBytes)
 
     if (m_connectionState == Vpn::ConnectionState::Connected && receivedBytes > 0) {
         m_healthChecksWithoutTraffic = 0;
+        m_connectedRecoveryAttempts = 0;
         m_noTrafficRecoveryAttempted = false;
+        stopConnectedRecovery();
         if (m_connectionHealth != ConnectionHealth::DnsFailed) {
             setConnectionHealth(ConnectionHealth::Healthy);
         }
@@ -122,13 +141,17 @@ void VpnConnection::onConnectionStateChanged(Vpn::ConnectionState state)
 {
     switch (state) {
     case Vpn::ConnectionState::Connecting:
-        setConnectionHealth(ConnectionHealth::StartingProtocol);
+        setConnectionHealth(m_silentReconnectInProgress
+                                ? ConnectionHealth::Recovering
+                                : ConnectionHealth::StartingProtocol);
+        stopConnectedRecovery();
         startConnectingWatchdog();
         stopConnectivityProbe();
         stopConnectedHealthCheck();
         break;
     case Vpn::ConnectionState::Reconnecting:
         setConnectionHealth(ConnectionHealth::Recovering);
+        stopConnectedRecovery();
         startConnectingWatchdog();
         stopConnectivityProbe();
         stopConnectedHealthCheck();
@@ -141,6 +164,7 @@ void VpnConnection::onConnectionStateChanged(Vpn::ConnectionState state)
         stopConnectingWatchdog();
         stopConnectivityProbe();
         stopConnectedHealthCheck();
+        stopConnectedRecovery();
         if (!connectionHealthProblem(m_connectionHealth)) {
             markLastError(ErrorCode::NoError);
         }
@@ -150,6 +174,7 @@ void VpnConnection::onConnectionStateChanged(Vpn::ConnectionState state)
         stopConnectingWatchdog();
         stopConnectivityProbe();
         stopConnectedHealthCheck();
+        stopConnectedRecovery();
         if (!connectionHealthProblem(m_connectionHealth)) {
             setConnectionHealth(ConnectionHealth::UnknownFailure);
         }
@@ -162,6 +187,7 @@ void VpnConnection::onConnectionStateChanged(Vpn::ConnectionState state)
         stopConnectingWatchdog();
         stopConnectivityProbe();
         stopConnectedHealthCheck();
+        stopConnectedRecovery();
         break;
     }
 
@@ -532,7 +558,9 @@ void VpnConnection::connectToVpn(int serverIndex, DockerContainer container, con
              << m_appSettingsRepository->routeMode();
 
     markLastError(ErrorCode::NoError);
+    m_connectedRecoveryAttempts = 0;
     m_noTrafficRecoveryAttempted = false;
+    stopConnectedRecovery();
     m_stoppingAfterFailure = false;
     m_currentServerIndex = serverIndex;
     m_currentContainer = container;
@@ -593,7 +621,9 @@ void VpnConnection::connectToVpn(int serverIndex, DockerContainer container, con
     if (m_vpnProtocol != protocol) {
         return;
     }
-    setConnectionHealth(ConnectionHealth::WaitingHandshake);
+    if (!m_silentReconnectInProgress) {
+        setConnectionHealth(ConnectionHealth::WaitingHandshake);
+    }
 }
 
 void VpnConnection::createProtocolConnections()
@@ -856,6 +886,9 @@ void VpnConnection::disconnectFromVpn()
 
     m_silentReconnectInProgress = false;
     m_stoppingAfterFailure = false;
+    m_connectedRecoveryAttempts = 0;
+    m_noTrafficRecoveryAttempted = false;
+    stopConnectedRecovery();
     setConnectionState(Vpn::ConnectionState::Disconnecting);
 
 #ifdef Q_OS_ANDROID
@@ -962,6 +995,9 @@ void VpnConnection::checkConnectedHealth()
         stopConnectedHealthCheck();
         return;
     }
+    if (m_silentReconnectInProgress) {
+        return;
+    }
     checkDnsHealth();
     if (m_connectionHealth == ConnectionHealth::DnsFailed) {
         return;
@@ -983,9 +1019,7 @@ void VpnConnection::checkConnectedHealth()
 
     ++m_healthChecksWithoutTraffic;
     if (m_healthChecksWithoutTraffic >= 5) {
-        markLastError(ErrorCode::VpnNoTrafficError);
-        setConnectionHealth(ConnectionHealth::NoTraffic);
-        stopConnectedHealthCheck();
+        recoverConnectedTunnel(ConnectionHealth::NoTraffic);
     }
 }
 
@@ -998,6 +1032,7 @@ void VpnConnection::onConnectivityProbeSucceeded()
 
     stopConnectivityProbe();
     markLastError(ErrorCode::NoError);
+    m_connectedRecoveryAttempts = 0;
     m_noTrafficRecoveryAttempted = false;
     if (m_connectionHealth != ConnectionHealth::DnsFailed) {
         setConnectionHealth(ConnectionHealth::Healthy);
@@ -1012,8 +1047,10 @@ void VpnConnection::onConnectivityProbeFailed()
     }
 
     stopConnectivityProbe();
-    markLastError(ErrorCode::VpnNoTrafficError);
-    setConnectionHealth(ConnectionHealth::NoTraffic);
+    if (m_silentReconnectInProgress) {
+        return;
+    }
+    recoverConnectedTunnel(ConnectionHealth::NoTraffic);
 }
 
 void VpnConnection::setConnectionHealth(ConnectionHealth health)
@@ -1089,15 +1126,22 @@ void VpnConnection::stopConnectedHealthCheck()
     m_healthChecksWithoutTraffic = 0;
 }
 
+void VpnConnection::stopConnectedRecovery()
+{
+    m_connectedRecoveryTimer.stop();
+}
+
 void VpnConnection::checkDnsHealth()
 {
     QHostInfo::lookupHost(QStringLiteral("cloudflare.com"), this, [this](const QHostInfo &hostInfo) {
         if (m_connectionState != Vpn::ConnectionState::Connected) {
             return;
         }
+        if (m_silentReconnectInProgress) {
+            return;
+        }
         if (hostInfo.error() != QHostInfo::NoError || hostInfo.addresses().isEmpty()) {
-            markLastError(ErrorCode::VpnNoTrafficError);
-            setConnectionHealth(ConnectionHealth::DnsFailed);
+            recoverConnectedTunnel(ConnectionHealth::DnsFailed);
             return;
         }
         if (m_connectionHealth == ConnectionHealth::DnsFailed) {
@@ -1105,6 +1149,44 @@ void VpnConnection::checkDnsHealth()
             setConnectionHealth(ConnectionHealth::Healthy);
         }
     });
+}
+
+void VpnConnection::recoverConnectedTunnel(ConnectionHealth health)
+{
+    markLastError(ErrorCode::VpnNoTrafficError);
+    setConnectionHealth(health);
+
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS) || defined(MACOS_NE)
+    stopConnectedHealthCheck();
+    return;
+#else
+    if (m_connectionState != Vpn::ConnectionState::Connected ||
+        m_silentReconnectInProgress ||
+        m_vpnProtocol.isNull() ||
+        m_currentServerIndex < 0) {
+        stopConnectedHealthCheck();
+        return;
+    }
+
+    if (m_connectedRecoveryAttempts >= kMaxConnectedRecoveryAttempts) {
+        stopConnectedHealthCheck();
+        return;
+    }
+
+    ++m_connectedRecoveryAttempts;
+    m_noTrafficRecoveryAttempted = true;
+    stopConnectedHealthCheck();
+    stopConnectivityProbe();
+
+    qWarning().noquote()
+        << "AmneziaDiagnostic event=auto_recover"
+        << "diagnostic=" + QString::number(static_cast<int>(health))
+        << "diagnostic_text=" + connectionHealthText(health)
+        << "attempt=" + QString::number(m_connectedRecoveryAttempts)
+        << "max_attempts=" + QString::number(kMaxConnectedRecoveryAttempts);
+
+    m_connectedRecoveryTimer.start();
+#endif
 }
 
 void VpnConnection::startConnectivityProbe()

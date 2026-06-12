@@ -100,6 +100,7 @@ private:
     QTimer m_checkTimer;
     QTimer m_connectingTimer;
     QTimer m_healthTimer;
+    QTimer m_connectedRecoveryTimer;
     // Single debounced flushDns after the per-site route batch completes — the
     // previous design called flushDns once per resolved site and produced
     // hundreds of "Failed to flush DNS" warnings on configs with large split
@@ -118,6 +119,7 @@ private:
    ConnectionHealth m_connectionHealth = ConnectionHealth::Idle;
    ErrorCode m_lastError = ErrorCode::NoError;
    int m_healthChecksWithoutTraffic = 0;
+   int m_connectedRecoveryAttempts = 0;
    bool m_noTrafficRecoveryAttempted = false;
    bool m_silentReconnectInProgress = false;
    bool m_stoppingAfterFailure = false;
@@ -131,7 +133,9 @@ private:
    void stopConnectingWatchdog();
    void startConnectedHealthCheck();
    void stopConnectedHealthCheck();
+   void stopConnectedRecovery();
    void checkDnsHealth();
+   void recoverConnectedTunnel(ConnectionHealth health);
    void startConnectivityProbe();
    void stopConnectivityProbe();
    void markLastError(ErrorCode error);
