@@ -58,8 +58,12 @@ WireguardProtocol::~WireguardProtocol()
 
 void WireguardProtocol::stop()
 {
+    if (m_stopped) {
+        return;
+    }
+
+    m_stopped = true;
     stopMzImpl();
-    return;
 }
 
 bool WireguardProtocol::requestStatus()
@@ -90,5 +94,6 @@ ErrorCode WireguardProtocol::stopMzImpl()
 
 ErrorCode WireguardProtocol::start()
 {
+    m_stopped = false;
     return startMzImpl();
 }

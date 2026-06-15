@@ -1019,7 +1019,7 @@ void VpnConnection::checkConnectedHealth()
 
     ++m_healthChecksWithoutTraffic;
     if (m_healthChecksWithoutTraffic >= 5) {
-        recoverConnectedTunnel(ConnectionHealth::NoTraffic);
+        startConnectivityProbe();
     }
 }
 

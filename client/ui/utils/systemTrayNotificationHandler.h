@@ -7,6 +7,8 @@
 
 #include "notificationHandler.h"
 
+#include "core/utils/connectionHealth.h"
+
 #include <QMenu>
 #include <QSystemTrayIcon>
 
@@ -22,6 +24,7 @@ public:
     void onTranslationsUpdated() override;
 
 public slots:
+    void setConnectionHealth(ConnectionHealth health);
     void updateWebsiteUrl(const QString &newWebsiteUrl);
 
 protected:
@@ -32,6 +35,7 @@ private:
     void showHideWindow();
 
     void setTrayState(Vpn::ConnectionState state);
+    void updateTrayIcon();
     void onTrayActivated(QSystemTrayIcon::ActivationReason reason);
 
     void setTrayIcon(const QString &iconPath);
@@ -51,6 +55,8 @@ private:
     const QString ConnectedTrayIconName = "active.png";
     const QString DisconnectedTrayIconName = "default.png";
     const QString ErrorTrayIconName = "error.png";
+    Vpn::ConnectionState m_connectionState = Vpn::ConnectionState::Disconnected;
+    ConnectionHealth m_connectionHealth = ConnectionHealth::Idle;
     QString  websiteUrl = "https://amnezia.org";
 };
 

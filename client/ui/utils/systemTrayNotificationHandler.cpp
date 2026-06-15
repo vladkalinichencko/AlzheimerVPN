@@ -57,6 +57,12 @@ void SystemTrayNotificationHandler::setConnectionState(Vpn::ConnectionState stat
     NotificationHandler::setConnectionState(state);
 }
 
+void SystemTrayNotificationHandler::setConnectionHealth(ConnectionHealth health)
+{
+    m_connectionHealth = health;
+    updateTrayIcon();
+}
+
 void SystemTrayNotificationHandler::onTranslationsUpdated()
 {
     m_trayActionShow->setText(tr("Show") + " " + APPLICATION_NAME);
@@ -91,41 +97,34 @@ void SystemTrayNotificationHandler::onTrayActivated(QSystemTrayIcon::ActivationR
 
 void SystemTrayNotificationHandler::setTrayState(Vpn::ConnectionState state)
 {
-    QString resourcesPath = ":/images/tray/%1";
+    m_connectionState = state;
 
     switch (state) {
     case Vpn::ConnectionState::Disconnected:
-        setTrayIcon(QString(resourcesPath).arg(DisconnectedTrayIconName));
         m_trayActionConnect->setEnabled(true);
         m_trayActionDisconnect->setEnabled(false);
         break;
     case Vpn::ConnectionState::Preparing:
-        setTrayIcon(QString(resourcesPath).arg(DisconnectedTrayIconName));
         m_trayActionConnect->setEnabled(false);
         m_trayActionDisconnect->setEnabled(true);
         break;
     case Vpn::ConnectionState::Connecting:
-        setTrayIcon(QString(resourcesPath).arg(DisconnectedTrayIconName));
         m_trayActionConnect->setEnabled(false);
         m_trayActionDisconnect->setEnabled(true);
         break;
     case Vpn::ConnectionState::Connected:
-        setTrayIcon(QString(resourcesPath).arg(ConnectedTrayIconName));
         m_trayActionConnect->setEnabled(false);
         m_trayActionDisconnect->setEnabled(true);
         break;
     case Vpn::ConnectionState::Disconnecting:
-        setTrayIcon(QString(resourcesPath).arg(DisconnectedTrayIconName));
         m_trayActionConnect->setEnabled(false);
         m_trayActionDisconnect->setEnabled(true);
         break;
     case Vpn::ConnectionState::Reconnecting:
-        setTrayIcon(QString(resourcesPath).arg(DisconnectedTrayIconName));
         m_trayActionConnect->setEnabled(false);
         m_trayActionDisconnect->setEnabled(true);
         break;
     case Vpn::ConnectionState::Error:
-        setTrayIcon(QString(resourcesPath).arg(ErrorTrayIconName));
         m_trayActionConnect->setEnabled(true);
         m_trayActionDisconnect->setEnabled(false);
         break;
@@ -133,8 +132,9 @@ void SystemTrayNotificationHandler::setTrayState(Vpn::ConnectionState state)
     default:
         m_trayActionConnect->setEnabled(false);
         m_trayActionDisconnect->setEnabled(true);
-        setTrayIcon(QString(resourcesPath).arg(DisconnectedTrayIconName));
     }
+
+    updateTrayIcon();
 
     //#ifdef Q_OS_MAC
     //    // Get theme from current user (note, this app can be launched as root application and in this case this theme can be different from theme of real current user )
@@ -143,6 +143,20 @@ void SystemTrayNotificationHandler::setTrayState(Vpn::ConnectionState state)
     //    resourcesPath = ":/images_mac/tray_icon/%1";
     //    useIconName = useIconName.replace(".png", darkTaskBar ? "@2x.png" : " dark@2x.png");
     //#endif
+}
+
+void SystemTrayNotificationHandler::updateTrayIcon()
+{
+    QString resourcesPath = ":/images/tray/%1";
+    QString iconName = DisconnectedTrayIconName;
+
+    if (m_connectionState == Vpn::ConnectionState::Error || connectionHealthProblem(m_connectionHealth)) {
+        iconName = ErrorTrayIconName;
+    } else if (m_connectionState == Vpn::ConnectionState::Connected) {
+        iconName = ConnectedTrayIconName;
+    }
+
+    setTrayIcon(QString(resourcesPath).arg(iconName));
 }
 
 
@@ -170,4 +184,3 @@ void SystemTrayNotificationHandler::showHideWindow() {
 //#endif
 //  }
 }
-

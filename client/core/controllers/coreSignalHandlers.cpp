@@ -412,6 +412,8 @@ void CoreSignalHandlers::initNotificationHandler()
 
     auto* trayHandler = qobject_cast<SystemTrayNotificationHandler*>(m_coreController->m_notificationHandler);
     connect(m_coreController, &CoreController::websiteUrlChanged, trayHandler, &SystemTrayNotificationHandler::updateWebsiteUrl);
+    connect(m_coreController->m_connectionController, &ConnectionController::connectionHealthChanged, trayHandler,
+            &SystemTrayNotificationHandler::setConnectionHealth);
 #endif    
 }
 
@@ -430,4 +432,3 @@ void CoreSignalHandlers::initUpdateFoundHandler()
     });
 #endif
 }
-

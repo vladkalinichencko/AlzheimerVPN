@@ -30,6 +30,7 @@ private:
 
     amnezia::Proto m_proto;
     QScopedPointer<ControllerImpl> m_impl;
+    bool m_stopped = true;
 };
 
 #endif // WIREGUARDPROTOCOL_H

@@ -126,7 +126,7 @@ private slots:
         QCOMPARE(connection.lastError(), ErrorCode::VpnBackendFailure);
     }
 
-    void connectedWithoutTrafficBecomesNoTraffic()
+    void connectedWithoutTrafficWaitsForActiveProbe()
     {
         TestableVpnConnection connection;
         auto *protocol = new FakePollingProtocol();
@@ -138,8 +138,8 @@ private slots:
         }
 
         QCOMPARE(protocol->statusRequests, 5);
-        QCOMPARE(connection.connectionHealth(), ConnectionHealth::NoTraffic);
-        QCOMPARE(connection.lastError(), ErrorCode::VpnNoTrafficError);
+        QCOMPARE(connection.connectionHealth(), ConnectionHealth::CheckingTraffic);
+        QCOMPARE(connection.lastError(), ErrorCode::NoError);
     }
 
     void dnsFailureIsNotOverwrittenByNoTraffic()
