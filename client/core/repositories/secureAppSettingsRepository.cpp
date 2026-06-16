@@ -2,15 +2,16 @@
 
 #include <QJsonDocument>
 #include <QJsonArray>
+#include <QJsonObject>
 #include <QUuid>
 
 #include "core/utils/errorCodes.h"
 #include "core/utils/routeModes.h"
 #include "core/utils/commonStructs.h"
-#include "core/utils/api/apiEnums.h"
+#include "core/utils/serverConfigUtils.h"
 #include "core/utils/constants/apiKeys.h"
 #include "core/utils/constants/apiConstants.h"
-#include "core/models/serverConfig.h"
+#include "core/utils/constants/configKeys.h"
 #include "core/utils/networkUtilities.h"
 
 using namespace amnezia;
@@ -432,28 +433,17 @@ void SecureAppSettingsRepository::clearSettings()
     emit settingsCleared();
 }
 
-QString SecureAppSettingsRepository::nextAvailableServerName() const
-{
-    int i = 0;
-    bool nameExist = false;
-
-    do {
-        i++;
-        nameExist = false;
-        QJsonArray servers = QJsonDocument::fromJson(value("Servers/serversList").toByteArray()).array();
-        for (const QJsonValue &server : servers) {
-            if (server.toObject().value(configKey::description).toString() == QString("Server") + " " + QString::number(i)) {
-                nameExist = true;
-                break;
-            }
-        }
-    } while (nameExist);
-
-    return QString("Server") + " " + QString::number(i);
-}
-
 void SecureAppSettingsRepository::setInstallationUuid(const QString &uuid)
 {
     m_settings->setValue("Conf/installationUuid", uuid);
 }
 
+QByteArray SecureAppSettingsRepository::xraySavedConfigs() const
+{
+    return value("Xray/savedConfigs").toByteArray();
+}
+
+void SecureAppSettingsRepository::setXraySavedConfigs(const QByteArray &data)
+{
+    setValue("Xray/savedConfigs", data);
+}

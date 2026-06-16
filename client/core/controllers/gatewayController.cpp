@@ -34,6 +34,8 @@ namespace
     constexpr QLatin1String errorResponsePattern1("No active configuration found for");
     constexpr QLatin1String errorResponsePattern2("No non-revoked public key found for");
     constexpr QLatin1String errorResponsePattern3("Account not found.");
+    constexpr QLatin1String errorResponsePatternQrSessionNotFound("QR session not found");
+    constexpr QLatin1String errorResponsePatternSessionNotFound("Session not found");
 
     constexpr QLatin1String updateRequestResponsePattern("client version update is required");
 
@@ -41,6 +43,7 @@ namespace
     constexpr int httpStatusCodeConflict = 409;
     constexpr int httpStatusCodeNotImplemented = 501;
     constexpr int httpStatusCodePaymentRequired = 402;
+    constexpr int httpStatusCodeRequestTimeout = 408;
     constexpr int httpStatusCodeUnprocessableEntity = 422;
 
     constexpr QLatin1String unprocessableSubscriptionMessage("Failed to retrieve subscription information. Is it activated?");
@@ -333,8 +336,9 @@ ErrorCode GatewayController::post(const QString &endpoint, const QJsonObject api
         reply->deleteLater();
     }
 
-    auto errorCode =
-            apiUtils::checkNetworkReplyErrors(sslErrors, replyErrorString, replyError, httpStatusCode, decryptionResult.decryptedBody);
+    responseBody = decryptionResult.decryptedBody;
+    const auto errorCode =
+            apiUtils::checkNetworkReplyErrors(sslErrors, replyErrorString, replyError, httpStatusCode, responseBody);
     if (errorCode) {
         return errorCode;
     }
@@ -350,7 +354,6 @@ ErrorCode GatewayController::post(const QString &endpoint, const QJsonObject api
         return ErrorCode::ApiConfigDecryptionError;
     }
 
-    responseBody = decryptionResult.decryptedBody;
     return ErrorCode::NoError;
 }
 
@@ -373,7 +376,7 @@ QFuture<QPair<ErrorCode, QByteArray>> GatewayController::postAsync(const QString
         auto errorCode = apiUtils::checkNetworkReplyErrors(sslErrors, replyErrorString, replyError, httpStatusCode,
                                                            decryptionResult.decryptedBody);
         if (errorCode) {
-            promise->addResult(qMakePair(errorCode, QByteArray()));
+            promise->addResult(qMakePair(errorCode, decryptionResult.decryptedBody));
             promise->finish();
             return;
         }
@@ -567,15 +570,19 @@ bool GatewayController::shouldBypassProxy(const QNetworkReply::NetworkError &rep
             << "reason=html_response";
         return true;
     } 
+    if (apiHttpStatus == httpStatusCodeRequestTimeout) {
+        return false;
+    }
     if (apiHttpStatus == httpStatusCodeNotFound) {
         if (responseBody.contains(errorResponsePattern1) || responseBody.contains(errorResponsePattern2)
-            || responseBody.contains(errorResponsePattern3)) {
+            || responseBody.contains(errorResponsePattern3) || responseBody.contains(errorResponsePatternQrSessionNotFound)
+            || responseBody.contains(errorResponsePatternSessionNotFound)) {
             return false;
         } else {
             qDebug() << replyError;
             return true;
         }
-    } 
+    }
     if (apiHttpStatus == httpStatusCodeNotImplemented) {
         if (responseBody.contains(updateRequestResponsePattern)) {
             return false;

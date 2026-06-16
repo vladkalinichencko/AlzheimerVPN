@@ -36,12 +36,52 @@
 #include "core/utils/containers/containerUtils.h"
 #include "core/utils/splitTunnelRoutePlanner.h"
 #include "core/utils/splitTunnelRule.h"
+#include "core/utils/serverConfigUtils.h"
 #include "vpnConnection.h"
 
 using namespace ProtocolUtils;
 
 namespace {
 constexpr int kMaxConnectedRecoveryAttempts = 3;
+
+DockerContainer defaultContainerForServer(const SecureServersRepository *repository, const QString &serverId)
+{
+    if (!repository || serverId.isEmpty()) {
+        return DockerContainer::None;
+    }
+
+    switch (repository->serverKind(serverId)) {
+    case serverConfigUtils::ConfigType::SelfHostedAdmin:
+        if (const auto cfg = repository->selfHostedAdminConfig(serverId)) {
+            return cfg->defaultContainer;
+        }
+        break;
+    case serverConfigUtils::ConfigType::SelfHostedUser:
+        if (const auto cfg = repository->selfHostedUserConfig(serverId)) {
+            return cfg->defaultContainer;
+        }
+        break;
+    case serverConfigUtils::ConfigType::Native:
+        if (const auto cfg = repository->nativeConfig(serverId)) {
+            return cfg->defaultContainer;
+        }
+        break;
+    case serverConfigUtils::ConfigType::AmneziaPremiumV2:
+    case serverConfigUtils::ConfigType::AmneziaFreeV3:
+    case serverConfigUtils::ConfigType::ExternalPremium:
+        if (const auto cfg = repository->apiV2Config(serverId)) {
+            return cfg->defaultContainer;
+        }
+        break;
+    case serverConfigUtils::ConfigType::AmneziaPremiumV1:
+    case serverConfigUtils::ConfigType::AmneziaFreeV2:
+    case serverConfigUtils::ConfigType::Invalid:
+    default:
+        break;
+    }
+
+    return DockerContainer::None;
+}
 }
 
 VpnConnection::VpnConnection(SecureServersRepository* serversRepository, SecureAppSettingsRepository* appSettingsRepository, QObject *parent)
@@ -66,7 +106,7 @@ VpnConnection::VpnConnection(SecureServersRepository* serversRepository, SecureA
         if (m_connectionState != Vpn::ConnectionState::Connected ||
             m_silentReconnectInProgress ||
             m_vpnProtocol.isNull() ||
-            m_currentServerIndex < 0) {
+            m_currentServerId.isEmpty()) {
             return;
         }
         reconnectToVpn();
@@ -200,8 +240,46 @@ void VpnConnection::onConnectionStateChanged(Vpn::ConnectionState state)
         return;
     }
 
-    ServerConfig defaultServer = m_serversRepository->server(m_serversRepository->defaultServerIndex());
-    DockerContainer container = defaultServer.defaultContainer();
+    const QString defaultServerId = m_serversRepository->defaultServerId();
+    DockerContainer container = DockerContainer::None;
+    switch (m_serversRepository->serverKind(defaultServerId)) {
+    case serverConfigUtils::ConfigType::SelfHostedAdmin: {
+        const auto cfg = m_serversRepository->selfHostedAdminConfig(defaultServerId);
+        if (cfg.has_value()) {
+            container = cfg->defaultContainer;
+        }
+        break;
+    }
+    case serverConfigUtils::ConfigType::SelfHostedUser: {
+        const auto cfg = m_serversRepository->selfHostedUserConfig(defaultServerId);
+        if (cfg.has_value()) {
+            container = cfg->defaultContainer;
+        }
+        break;
+    }
+    case serverConfigUtils::ConfigType::Native: {
+        const auto cfg = m_serversRepository->nativeConfig(defaultServerId);
+        if (cfg.has_value()) {
+            container = cfg->defaultContainer;
+        }
+        break;
+    }
+    case serverConfigUtils::ConfigType::AmneziaPremiumV2:
+    case serverConfigUtils::ConfigType::AmneziaFreeV3:
+    case serverConfigUtils::ConfigType::ExternalPremium: {
+        const auto cfg = m_serversRepository->apiV2Config(defaultServerId);
+        if (cfg.has_value()) {
+            container = cfg->defaultContainer;
+        }
+        break;
+    }
+    case serverConfigUtils::ConfigType::AmneziaPremiumV1:
+    case serverConfigUtils::ConfigType::AmneziaFreeV2:
+        break;
+    case serverConfigUtils::ConfigType::Invalid:
+    default:
+        break;
+    }
 
     // AWG / WireGuard route/DNS/split-tunnel management lives entirely in the
     // daemon (Daemon::activate -> WireguardUtilsMacos -> MacosRouteMonitor +
@@ -352,9 +430,7 @@ void VpnConnection::addSitesRoutes(const QString &gw, amnezia::RouteMode mode)
     // protocols. The daemon owns DNS and split-tunnel routes for them; running
     // this would race with the daemon and break AmneziaWG handshake retention
     // (see legacyRouting guard in onConnectionStateChanged).
-    const DockerContainer container =
-        m_serversRepository->server(m_serversRepository->defaultServerIndex())
-            .defaultContainer();
+    const DockerContainer container = defaultContainerForServer(m_serversRepository, m_serversRepository->defaultServerId());
     if (ContainerUtils::isAwgContainer(container) ||
         container == DockerContainer::WireGuard) {
         return;
@@ -405,9 +481,7 @@ void VpnConnection::configureDnsSplitTunnel(const QString &gw, amnezia::RouteMod
     // inside the daemon. Calling the legacy IpcServer path here would set the
     // system resolver from the client side too, racing the daemon and breaking
     // post-handshake DATA exchange.
-    const DockerContainer container =
-        m_serversRepository->server(m_serversRepository->defaultServerIndex())
-            .defaultContainer();
+    const DockerContainer container = defaultContainerForServer(m_serversRepository, m_serversRepository->defaultServerId());
     if (ContainerUtils::isAwgContainer(container) ||
         container == DockerContainer::WireGuard) {
         return;
@@ -544,7 +618,7 @@ ConnectionHealth VpnConnection::connectionHealth() const
     return m_connectionHealth;
 }
 
-void VpnConnection::connectToVpn(int serverIndex, DockerContainer container, const QJsonObject &vpnConfiguration)
+void VpnConnection::connectToVpn(const QString &serverId, DockerContainer container, const QJsonObject &vpnConfiguration)
 {
     if (!m_appSettingsRepository || !m_serversRepository) {
         qCritical() << "VpnConnection::connectToVpn: repositories not initialized";
@@ -552,8 +626,8 @@ void VpnConnection::connectToVpn(int serverIndex, DockerContainer container, con
         return;
     }
 
-    qDebug() << QString("Trying to connect to VPN, server index is %1, container is %2, route mode is")
-                        .arg(serverIndex)
+    qDebug() << QString("Trying to connect to VPN, server id is %1, container is %2, route mode is")
+                        .arg(serverId)
                         .arg(ContainerUtils::containerToString(container))
              << m_appSettingsRepository->routeMode();
 
@@ -562,7 +636,7 @@ void VpnConnection::connectToVpn(int serverIndex, DockerContainer container, con
     m_noTrafficRecoveryAttempted = false;
     stopConnectedRecovery();
     m_stoppingAfterFailure = false;
-    m_currentServerIndex = serverIndex;
+    m_currentServerId = serverId;
     m_currentContainer = container;
     m_remoteAddress = NetworkUtilities::getIPAddress(vpnConfiguration.value(configKey::hostName).toString());
     setConnectionState(Vpn::ConnectionState::Connecting);
@@ -1163,7 +1237,7 @@ void VpnConnection::recoverConnectedTunnel(ConnectionHealth health)
     if (m_connectionState != Vpn::ConnectionState::Connected ||
         m_silentReconnectInProgress ||
         m_vpnProtocol.isNull() ||
-        m_currentServerIndex < 0) {
+        m_currentServerId.isEmpty()) {
         stopConnectedHealthCheck();
         return;
     }

@@ -39,6 +39,9 @@ private:
     // metacall while stop() is already running, otherwise stop() recurses.
     bool m_stopping = false;
     bool m_stopRequested = false;
+    int m_tun2socksRetryCount = 0;
+    static constexpr int maxTun2SocksRetries = 5;
+    static constexpr int tun2socksRetryDelayMs = 400;
 };
 
 #endif // XRAYPROTOCOL_H

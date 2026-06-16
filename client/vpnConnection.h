@@ -54,7 +54,7 @@ public:
 
 public slots:
     void setRepositories(SecureServersRepository* serversRepository, SecureAppSettingsRepository* appSettingsRepository);
-    void connectToVpn(int serverIndex, DockerContainer container, const QJsonObject &vpnConfiguration);
+    void connectToVpn(const QString &serverId, DockerContainer container, const QJsonObject &vpnConfiguration);
     void reconnectToVpn();
     void disconnectFromVpn();
     void refreshSiteSplitTunnelRoutes();
@@ -123,7 +123,7 @@ private:
    bool m_noTrafficRecoveryAttempted = false;
    bool m_silentReconnectInProgress = false;
    bool m_stoppingAfterFailure = false;
-   int m_currentServerIndex = -1;
+   QString m_currentServerId;
    DockerContainer m_currentContainer = DockerContainer::None;
 
    void createProtocolConnections();
