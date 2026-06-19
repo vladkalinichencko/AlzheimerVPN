@@ -77,12 +77,10 @@ void SystemTrayNotificationHandler::updateWebsiteUrl(const QString &newWebsiteUr
     websiteUrl = newWebsiteUrl;
 }
 
-void SystemTrayNotificationHandler::setTrayIcon(const QString &iconPath)
+void SystemTrayNotificationHandler::setTrayIcon(const QString &iconPath, bool useNativeMask)
 {
     QIcon trayIconMask(QPixmap(iconPath).scaled(128,128));
-#ifndef Q_OS_MAC
-    trayIconMask.setIsMask(true);
-#endif
+    trayIconMask.setIsMask(useNativeMask);
     m_systemTrayIcon.setIcon(trayIconMask);
 }
 
@@ -149,14 +147,16 @@ void SystemTrayNotificationHandler::updateTrayIcon()
 {
     QString resourcesPath = ":/images/tray/%1";
     QString iconName = DisconnectedTrayIconName;
+    bool useNativeMask = true;
 
     if (m_connectionState == Vpn::ConnectionState::Error || connectionHealthProblem(m_connectionHealth)) {
         iconName = ErrorTrayIconName;
+        useNativeMask = false;
     } else if (m_connectionState == Vpn::ConnectionState::Connected) {
         iconName = ConnectedTrayIconName;
     }
 
-    setTrayIcon(QString(resourcesPath).arg(iconName));
+    setTrayIcon(QString(resourcesPath).arg(iconName), useNativeMask);
 }
 
 

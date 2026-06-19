@@ -38,7 +38,7 @@ private:
     void updateTrayIcon();
     void onTrayActivated(QSystemTrayIcon::ActivationReason reason);
 
-    void setTrayIcon(const QString &iconPath);
+    void setTrayIcon(const QString &iconPath, bool useNativeMask);
 
 private:
     QMenu m_menu;
