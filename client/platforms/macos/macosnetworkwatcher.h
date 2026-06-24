@@ -43,11 +43,17 @@ class MacOSNetworkWatcher final : public IOSNetworkWatcher {
   void start() override;
 
   bool checkInterface();
+  void prepareForSleep();
+  void requestWakeup();
 
   void controllerStateChanged();
 
  private:
+  void networkPathChanged(bool ready, uint64_t generation) override;
+
   void* m_delegate = nullptr;
+  bool m_wakeupPending = false;
+  std::atomic_uint64_t m_sleepPathGeneration = 0;
   PowerNotificationsListener m_powerlistener;
 };
 

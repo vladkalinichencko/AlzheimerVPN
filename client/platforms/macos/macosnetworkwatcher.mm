@@ -151,6 +151,9 @@ void PowerNotificationsListener::sleepWakeupCallBack(void *refParam, io_service_
          */
 
         logger.debug() << "System power message: system WILL sleep";
+        if (listener->m_watcher) {
+            listener->m_watcher->prepareForSleep();
+        }
         IOAllowPowerChange(listener->rootPowerDomain, reinterpret_cast<long>(messageArgument));
         break;
 
@@ -170,11 +173,11 @@ void PowerNotificationsListener::sleepWakeupCallBack(void *refParam, io_service_
         break;
 
     case kIOMessageSystemHasPoweredOn:
-        /* Announces that the system and its devices have woken up. */
-        logger.debug() << "System has powered on - emitting wakeup signal from dedicated CFRunLoop thread";
+        logger.debug() << "System has powered on - waiting for network path";
         if (listener->m_watcher) {
-            // Use QMetaObject::invokeMethod for thread-safe signal emission
-            QMetaObject::invokeMethod(listener->m_watcher, "wakeup", Qt::QueuedConnection);
+            QMetaObject::invokeMethod(listener->m_watcher, [watcher = listener->m_watcher]() {
+                watcher->requestWakeup();
+            }, Qt::QueuedConnection);
         }
         break;
 
@@ -187,6 +190,27 @@ void PowerNotificationsListener::sleepWakeupCallBack(void *refParam, io_service_
 
 MacOSNetworkWatcher::MacOSNetworkWatcher(QObject* parent) : IOSNetworkWatcher(parent), m_powerlistener(this) {
   MZ_COUNT_CTOR(MacOSNetworkWatcher);
+}
+
+void MacOSNetworkWatcher::prepareForSleep() {
+  m_sleepPathGeneration.store(networkPathGeneration());
+}
+
+void MacOSNetworkWatcher::requestWakeup() {
+  m_wakeupPending = true;
+  const uint64_t generation = networkPathGeneration();
+  if (networkPathReady() && generation > m_sleepPathGeneration.load()) {
+    networkPathChanged(true, generation);
+  }
+}
+
+void MacOSNetworkWatcher::networkPathChanged(bool ready, uint64_t generation) {
+  if (!ready || !m_wakeupPending || generation <= m_sleepPathGeneration.load()) {
+    return;
+  }
+  m_wakeupPending = false;
+  logger.debug() << "Network path ready after wakeup";
+  emit wakeup();
 }
 
 MacOSNetworkWatcher::~MacOSNetworkWatcher() {
