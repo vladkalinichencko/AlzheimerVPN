@@ -20,6 +20,7 @@
 #include "QRsa.h"
 
 #include "amneziaApplication.h"
+#include "core/repositories/secureAppSettingsRepository.h"
 #include "core/utils/api/apiUtils.h"
 #include "core/utils/constants/apiKeys.h"
 #include "core/utils/networkUtilities.h"
@@ -54,6 +55,42 @@ namespace
     {
         QByteArray key = isDevEnvironment ? DEV_AGW_PUBLIC_KEY : PROD_AGW_PUBLIC_KEY;
         return key.replace("\\n", "\n");
+    }
+
+    QString proxyUrlsCacheKey(const QString &serviceType, const QString &userCountryCode)
+    {
+        return QStringLiteral("service_%1_country_%2").arg(serviceType, userCountryCode);
+    }
+
+    QStringList decryptProxyUrls(const QByteArray &encrypted, bool isDevEnvironment)
+    {
+        if (encrypted.isEmpty()) {
+            return {};
+        }
+
+        try {
+            QByteArray responseBody;
+            if (!isDevEnvironment) {
+                QCryptographicHash hash(QCryptographicHash::Sha512);
+                hash.addData(agwPublicKey(false));
+                const QByteArray result = hash.result().toHex();
+                responseBody = QSimpleCrypto::QBlockCipher().decryptAesBlockCipher(
+                        QByteArray::fromBase64(encrypted),
+                        QByteArray::fromHex(result.left(64)),
+                        QByteArray::fromHex(result.mid(64, 32)));
+            } else {
+                responseBody = encrypted;
+            }
+
+            QStringList endpoints;
+            for (const QJsonValue &endpoint : QJsonDocument::fromJson(responseBody).array()) {
+                endpoints.push_back(endpoint.toString());
+            }
+            return endpoints;
+        } catch (...) {
+            Utils::logException();
+            return {};
+        }
     }
 
     QNetworkAccessManager *networkManagerForCurrentThread()
@@ -164,12 +201,14 @@ namespace
 }
 
 GatewayController::GatewayController(const QString &gatewayEndpoint, const bool isDevEnvironment, const int requestTimeoutMsecs,
-                                     const bool isStrictKillSwitchEnabled, QObject *parent)
+                                     const bool isStrictKillSwitchEnabled, SecureAppSettingsRepository *appSettingsRepository,
+                                     QObject *parent)
     : QObject(parent),
       m_gatewayEndpoint(gatewayEndpoint),
       m_isDevEnvironment(isDevEnvironment),
       m_requestTimeoutMsecs(requestTimeoutMsecs),
-      m_isStrictKillSwitchEnabled(isStrictKillSwitchEnabled)
+      m_isStrictKillSwitchEnabled(isStrictKillSwitchEnabled),
+      m_appSettingsRepository(appSettingsRepository)
 {
 }
 
@@ -426,7 +465,8 @@ QFuture<QPair<ErrorCode, QByteArray>> GatewayController::postAsync(const QString
     const auto serviceType = apiPayload.value(apiDefs::key::serviceType).toString("");
     const auto userCountryCode = apiPayload.value(apiDefs::key::userCountryCode).toString("");
     const QStringList proxyStorageUrls = buildProxyStorageUrls(m_isDevEnvironment, serviceType, userCountryCode);
-    getProxyUrlsAsync(proxyStorageUrls, 0, [this, encRequestData, endpoint, processResponse, sendDirect](const QStringList &proxyUrls) mutable {
+    getProxyUrlsAsync(proxyStorageUrls, 0, proxyUrlsCacheKey(serviceType, userCountryCode),
+                      [this, encRequestData, endpoint, processResponse, sendDirect](const QStringList &proxyUrls) mutable {
         getProxyUrlAsync(proxyUrls, 0, [this, encRequestData, endpoint, processResponse, sendDirect](const QString &proxyUrl) mutable {
             if (proxyUrl.isEmpty()) {
                 sendDirect();
@@ -462,12 +502,13 @@ QStringList GatewayController::getProxyUrls(const QString &serviceType, const QS
     QList<QSslError> sslErrors;
     QNetworkReply *reply;
 
-    QByteArray key = agwPublicKey(m_isDevEnvironment);
     QStringList proxyStorageUrls = buildProxyStorageUrls(m_isDevEnvironment, serviceType, userCountryCode);
+    const QString cacheKey = proxyUrlsCacheKey(serviceType, userCountryCode);
+    const QByteArray cachedProxyUrls = m_appSettingsRepository->readGatewayProxyUrls(cacheKey);
 
     if (proxyStorageUrls.empty()) {
         qDebug() << "empty storage endpoint list";
-        return {};
+        return decryptProxyUrls(cachedProxyUrls, m_isDevEnvironment);
     }
 
     for (const auto &proxyStorageUrl : proxyStorageUrls) {
@@ -482,37 +523,15 @@ QStringList GatewayController::getProxyUrls(const QString &serviceType, const QS
             auto encryptedResponseBody = reply->readAll();
             reply->deleteLater();
 
-            EVP_PKEY *privateKey = nullptr;
-            QByteArray responseBody;
             try {
-                if (!m_isDevEnvironment) {
-                    QCryptographicHash hash(QCryptographicHash::Sha512);
-                    hash.addData(key);
-                    QByteArray hashResult = hash.result().toHex();
-
-                    QByteArray key = QByteArray::fromHex(hashResult.left(64));
-                    QByteArray iv = QByteArray::fromHex(hashResult.mid(64, 32));
-
-                    QByteArray ba = QByteArray::fromBase64(encryptedResponseBody);
-
-                    QSimpleCrypto::QBlockCipher blockCipher;
-                    responseBody = blockCipher.decryptAesBlockCipher(ba, key, iv);
-                } else {
-                    responseBody = encryptedResponseBody;
-                }
+                const QStringList endpoints = decryptProxyUrls(encryptedResponseBody, m_isDevEnvironment);
+                m_appSettingsRepository->writeGatewayProxyUrls(cacheKey, encryptedResponseBody);
+                return endpoints;
             } catch (...) {
                 Utils::logException();
                 qCritical() << "error loading private key from environment variables or decrypting payload" << encryptedResponseBody;
                 continue;
             }
-
-            auto endpointsArray = QJsonDocument::fromJson(responseBody).array();
-
-            QStringList endpoints;
-            for (const auto &endpoint : endpointsArray) {
-                endpoints.push_back(endpoint.toString());
-            }
-            return endpoints;
         } else {
             auto replyError = reply->error();
             int httpStatusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
@@ -523,7 +542,7 @@ QStringList GatewayController::getProxyUrls(const QString &serviceType, const QS
             reply->deleteLater();
         }
     }
-    return {};
+    return decryptProxyUrls(cachedProxyUrls, m_isDevEnvironment);
 }
 
 bool GatewayController::shouldBypassProxy(const QNetworkReply::NetworkError &replyError, const QByteArray &decryptedResponseBody,
@@ -714,7 +733,7 @@ void GatewayController::bypassProxy(const QString &endpoint, const QString &serv
 }
 
 void GatewayController::getProxyUrlsAsync(const QStringList proxyStorageUrls, const int /*unusedStartIndex*/,
-                                          std::function<void(const QStringList &)> onComplete)
+                                          const QString &cacheKey, std::function<void(const QStringList &)> onComplete)
 {
     // Race all storage URLs in parallel instead of sequentially-with-3s-timeout-each.
     // Old behaviour gave up to ~24s of dead wait when every storage CDN was slow,
@@ -723,7 +742,7 @@ void GatewayController::getProxyUrlsAsync(const QStringList proxyStorageUrls, co
     // First reply that returns a non-empty decrypted endpoint list wins; the
     // rest are aborted. Per-reply decrypt/empty failures don't end the race.
     if (proxyStorageUrls.isEmpty()) {
-        onComplete({});
+        onComplete(decryptProxyUrls(m_appSettingsRepository->readGatewayProxyUrls(cacheKey), m_isDevEnvironment));
         return;
     }
 
@@ -761,7 +780,7 @@ void GatewayController::getProxyUrlsAsync(const QStringList proxyStorageUrls, co
         QNetworkReply *reply = networkManagerForCurrentThread()->get(request);
         state->replies.append(reply);
 
-        connect(reply, &QNetworkReply::finished, this, [this, reply, state, total, finishOnce]() {
+        connect(reply, &QNetworkReply::finished, this, [this, reply, state, total, cacheKey, finishOnce]() {
             if (state->decided) {
                 reply->deleteLater();
                 return;
@@ -779,29 +798,12 @@ void GatewayController::getProxyUrlsAsync(const QStringList proxyStorageUrls, co
 
             if (replyOk && !encrypted.isEmpty()) {
                 try {
-                    QByteArray key = agwPublicKey(m_isDevEnvironment);
-                    QByteArray responseBody;
-                    if (!m_isDevEnvironment) {
-                        QCryptographicHash hash(QCryptographicHash::Sha512);
-                        hash.addData(key);
-                        QByteArray h = hash.result().toHex();
-                        QByteArray decKey = QByteArray::fromHex(h.left(64));
-                        QByteArray iv = QByteArray::fromHex(h.mid(64, 32));
-                        QByteArray ba = QByteArray::fromBase64(encrypted);
-                        QSimpleCrypto::QBlockCipher cipher;
-                        responseBody = cipher.decryptAesBlockCipher(ba, decKey, iv);
-                    } else {
-                        responseBody = encrypted;
-                    }
-                    QJsonArray endpointsArray = QJsonDocument::fromJson(responseBody).array();
-                    QStringList endpoints;
-                    for (const QJsonValue &endpoint : endpointsArray) {
-                        endpoints.push_back(endpoint.toString());
-                    }
+                    QStringList endpoints = decryptProxyUrls(encrypted, m_isDevEnvironment);
                     if (!endpoints.isEmpty()) {
                         std::random_device randomDevice;
                         std::mt19937 generator(randomDevice());
                         std::shuffle(endpoints.begin(), endpoints.end(), generator);
+                        m_appSettingsRepository->writeGatewayProxyUrls(cacheKey, encrypted);
                         finishOnce(endpoints, nullptr);
                         return;
                     }
@@ -814,7 +816,7 @@ void GatewayController::getProxyUrlsAsync(const QStringList proxyStorageUrls, co
             }
 
             if (state->finishedCount >= total) {
-                finishOnce({}, nullptr);
+                finishOnce(decryptProxyUrls(m_appSettingsRepository->readGatewayProxyUrls(cacheKey), m_isDevEnvironment), nullptr);
             }
         });
     }
