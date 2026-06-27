@@ -6,10 +6,11 @@
 #include <QObject>
 #include <QPointer>
 #include <QRemoteObjectNode>
-#include <QScopedPointer>
 #include <QString>
 #include <QTcpSocket>
 #include <QTimer>
+
+#include <memory>
 
 #include "core/protocols/vpnProtocol.h"
 #include "core/utils/connectionHealth.h"
@@ -106,7 +107,7 @@ private:
     // hundreds of "Failed to flush DNS" warnings on configs with large split
     // lists (and also slowed teardown by piling work on the daemon).
     QTimer m_dnsFlushDebounce;
-    QScopedPointer<QTcpSocket> m_connectivityProbe;
+    std::unique_ptr<QTcpSocket> m_connectivityProbe;
 
 #ifdef Q_OS_ANDROID
    AndroidVpnProtocol* androidVpnProtocol = nullptr;
@@ -135,7 +136,9 @@ private:
    void stopConnectedHealthCheck();
    void stopConnectedRecovery();
    void checkDnsHealth();
-   void recoverConnectedTunnel(ConnectionHealth health);
+   void startSilentReconnect();
+   bool handleSilentReconnectFailure(ConnectionHealth health, ErrorCode error);
+   bool recoverConnectedTunnel(ConnectionHealth health, ErrorCode error = ErrorCode::VpnNoTrafficError);
    void startConnectivityProbe();
    void stopConnectivityProbe();
    void markLastError(ErrorCode error);

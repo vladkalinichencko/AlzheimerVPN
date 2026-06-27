@@ -65,13 +65,13 @@ QFuture<QPair<ErrorCode, QJsonArray>> NewsController::fetchNews()
 {
     if (!m_serversRepository) {
         qWarning() << "SecureServersRepository is null, skip fetchNews";
-        return QtFuture::makeReadyFuture(qMakePair(ErrorCode::InternalError, QJsonArray()));
+        return QtFuture::makeReadyValueFuture(qMakePair(ErrorCode::InternalError, QJsonArray()));
     }
 
     const QJsonObject services = getServicesList();
     if (services.isEmpty()) {
         qDebug() << "No Gateway stacks, skip fetchNews";
-        return QtFuture::makeReadyFuture(qMakePair(ErrorCode::NoError, QJsonArray()));
+        return QtFuture::makeReadyValueFuture(qMakePair(ErrorCode::NoError, QJsonArray()));
     }
 
     auto gatewayController = QSharedPointer<GatewayController>::create(

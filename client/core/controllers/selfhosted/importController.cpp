@@ -196,7 +196,8 @@ ImportController::ImportResult ImportController::extractConfigFromData(const QSt
         result.errorCode = ErrorCode::ImportInvalidConfigError;
         return result;
     }
-    case ConfigTypes::Xray: {
+    case ConfigTypes::Xray:
+    case ConfigTypes::ShadowSocks: {
         result.config = extractXrayConfig(config, configType);
         if (!result.config.empty()) {
             return result;
@@ -775,4 +776,3 @@ void ImportController::processAmneziaConfig(QJsonObject &config) const
         }
     }
 }
-

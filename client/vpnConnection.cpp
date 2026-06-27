@@ -109,7 +109,7 @@ VpnConnection::VpnConnection(SecureServersRepository* serversRepository, SecureA
             m_currentServerId.isEmpty()) {
             return;
         }
-        reconnectToVpn();
+        startSilentReconnect();
     });
 
     m_dnsFlushDebounce.setSingleShot(true);
@@ -906,8 +906,33 @@ void VpnConnection::reconnectToVpn() {
         return;
     }
 
+    if (!m_silentReconnectInProgress) {
+        m_connectedRecoveryAttempts = 0;
+    }
+    if (m_connectedRecoveryAttempts >= kMaxConnectedRecoveryAttempts) {
+        qWarning() << "Automatic reconnect limit reached; ignoring reconnect request";
+        return;
+    }
+
+    ++m_connectedRecoveryAttempts;
+    m_noTrafficRecoveryAttempted = true;
+
+    qWarning().noquote()
+        << "AmneziaDiagnostic event=auto_recover"
+        << "diagnostic=" + QString::number(static_cast<int>(m_connectionHealth))
+        << "diagnostic_text=" + connectionHealthText(m_connectionHealth)
+        << "attempt=" + QString::number(m_connectedRecoveryAttempts)
+        << "max_attempts=" + QString::number(kMaxConnectedRecoveryAttempts);
+
+    startSilentReconnect();
+}
+
+void VpnConnection::startSilentReconnect()
+{
     qDebug() << "Reconnect triggered. Reconnecting to the server";
 
+    stopConnectingWatchdog();
+    stopConnectedRecovery();
     m_silentReconnectInProgress = true;
     setConnectionHealth(ConnectionHealth::Recovering);
 
@@ -927,10 +952,12 @@ void VpnConnection::reconnectToVpn() {
     }
     createProtocolConnections();
 
+    startConnectingWatchdog();
     if (ErrorCode err = protocol->start(); err != ErrorCode::NoError) {
         if (m_vpnProtocol != protocol) {
             return;
         }
+        stopConnectingWatchdog();
         m_silentReconnectInProgress = false;
         markLastError(err);
         setConnectionHealth(ConnectionHealth::ProtocolStartFailed);
@@ -942,7 +969,9 @@ void VpnConnection::reconnectToVpn() {
     if (m_vpnProtocol != protocol) {
         return;
     }
-    setConnectionHealth(ConnectionHealth::WaitingHandshake);
+    if (m_silentReconnectInProgress) {
+        setConnectionHealth(ConnectionHealth::Recovering);
+    }
 }
 
 void VpnConnection::disconnectFromVpn()
@@ -995,6 +1024,8 @@ void VpnConnection::setConnectionState(Vpn::ConnectionState state) {
     if (m_silentReconnectInProgress &&
         state == Vpn::ConnectionState::Disconnected &&
         previousState == Vpn::ConnectionState::Connected) {
+        handleSilentReconnectFailure(ConnectionHealth::LocalServiceUnavailable,
+                                     ErrorCode::AmneziaServiceConnectionFailed);
         return;
     }
     if (m_stoppingAfterFailure &&
@@ -1047,8 +1078,18 @@ void VpnConnection::onProtocolError(ErrorCode error)
 
 void VpnConnection::onConnectingTimedOut()
 {
-    if (m_connectionState != Vpn::ConnectionState::Connecting &&
+    const bool silentReconnectTimedOut =
+        m_silentReconnectInProgress &&
+        m_connectionState == Vpn::ConnectionState::Connected;
+    if (!silentReconnectTimedOut &&
+        m_connectionState != Vpn::ConnectionState::Connecting &&
         m_connectionState != Vpn::ConnectionState::Reconnecting) {
+        return;
+    }
+
+    if (silentReconnectTimedOut) {
+        handleSilentReconnectFailure(ConnectionHealth::HandshakeTimeout,
+                                     ErrorCode::VpnHandshakeTimeout);
         return;
     }
 
@@ -1061,6 +1102,26 @@ void VpnConnection::onConnectingTimedOut()
     setConnectionState(Vpn::ConnectionState::Error);
     m_stoppingAfterFailure = false;
     emit vpnProtocolError(ErrorCode::VpnHandshakeTimeout);
+}
+
+bool VpnConnection::handleSilentReconnectFailure(ConnectionHealth health, ErrorCode error)
+{
+    stopConnectingWatchdog();
+    m_silentReconnectInProgress = false;
+
+    if (!m_vpnProtocol.isNull()) {
+        m_stoppingAfterFailure = true;
+        m_vpnProtocol->stop();
+        m_stoppingAfterFailure = false;
+    }
+
+    if (recoverConnectedTunnel(health, error)) {
+        return true;
+    }
+
+    setConnectionState(Vpn::ConnectionState::Error);
+    emit vpnProtocolError(error);
+    return false;
 }
 
 void VpnConnection::checkConnectedHealth()
@@ -1225,26 +1286,26 @@ void VpnConnection::checkDnsHealth()
     });
 }
 
-void VpnConnection::recoverConnectedTunnel(ConnectionHealth health)
+bool VpnConnection::recoverConnectedTunnel(ConnectionHealth health, ErrorCode error)
 {
-    markLastError(ErrorCode::VpnNoTrafficError);
+    markLastError(error);
     setConnectionHealth(health);
 
 #if defined(Q_OS_ANDROID) || defined(Q_OS_IOS) || defined(MACOS_NE)
     stopConnectedHealthCheck();
-    return;
+    return false;
 #else
     if (m_connectionState != Vpn::ConnectionState::Connected ||
         m_silentReconnectInProgress ||
         m_vpnProtocol.isNull() ||
         m_currentServerId.isEmpty()) {
         stopConnectedHealthCheck();
-        return;
+        return false;
     }
 
     if (m_connectedRecoveryAttempts >= kMaxConnectedRecoveryAttempts) {
         stopConnectedHealthCheck();
-        return;
+        return false;
     }
 
     ++m_connectedRecoveryAttempts;
@@ -1260,6 +1321,7 @@ void VpnConnection::recoverConnectedTunnel(ConnectionHealth health)
         << "max_attempts=" + QString::number(kMaxConnectedRecoveryAttempts);
 
     m_connectedRecoveryTimer.start();
+    return true;
 #endif
 }
 
@@ -1279,7 +1341,7 @@ void VpnConnection::startConnectivityProbe()
 
     QPointer<QTcpSocket> probe(socket);
     QTimer::singleShot(5000, this, [this, probe]() {
-        if (probe && m_connectivityProbe.data() == probe && probe->state() != QAbstractSocket::ConnectedState) {
+        if (probe && m_connectivityProbe.get() == probe && probe->state() != QAbstractSocket::ConnectedState) {
             onConnectivityProbeFailed();
         }
     });
@@ -1293,7 +1355,7 @@ void VpnConnection::stopConnectivityProbe()
         return;
     }
 
-    QTcpSocket *probe = m_connectivityProbe.take();
+    QTcpSocket *probe = m_connectivityProbe.release();
     probe->disconnect(this);
     probe->abort();
     probe->deleteLater();

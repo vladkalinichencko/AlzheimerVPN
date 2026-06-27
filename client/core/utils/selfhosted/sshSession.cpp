@@ -197,11 +197,13 @@ ErrorCode SshSession::uploadFileToHost(const ServerCredentials &credentials, con
     }
 
     QTemporaryFile localFile;
-    localFile.open();
+    if (!localFile.open()) {
+        return ErrorCode::SshScpFailureError;
+    }
     localFile.write(data);
     localFile.close();
 
-    error = m_sshClient.scpFileCopy(overwriteMode, localFile.fileName(), remotePath, "non_desc");
+    error = m_sshClient.scpFileCopy(overwriteMode, localFile.fileName(), remotePath);
 
     if (error != ErrorCode::NoError) {
         return error;

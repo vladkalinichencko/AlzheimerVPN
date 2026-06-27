@@ -3,6 +3,11 @@ set(CLIENT_ROOT_DIR ${CMAKE_CURRENT_LIST_DIR}/..)
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/Modules;${CMAKE_MODULE_PATH}")
 
 add_subdirectory(${CLIENT_ROOT_DIR}/3rd/SortFilterProxyModel)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    # This pinned third-party revision still supports Qt versions older than
+    # beginFilterChange()/endFilterChange(). Keep its deprecation local.
+    target_compile_options(SortFilterProxyModel PRIVATE -Wno-deprecated-declarations)
+endif()
 set(LIBS ${LIBS} SortFilterProxyModel)
 include(${CLIENT_ROOT_DIR}/cmake/QSimpleCrypto.cmake)
 

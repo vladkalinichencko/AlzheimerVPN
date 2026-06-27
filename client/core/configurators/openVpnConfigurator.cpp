@@ -245,11 +245,17 @@ OpenVpnConfigurator::ConnectionData OpenVpnConfigurator::createCertRequest()
 
     QByteArray clientIdUtf8 = connData.clientId.toUtf8();
 
-    EVP_PKEY *pKey = EVP_PKEY_new();
-    q_check_ptr(pKey);
-    RSA *rsa = RSA_generate_key(2048, RSA_F4, nullptr, nullptr);
-    q_check_ptr(rsa);
-    EVP_PKEY_assign_RSA(pKey, rsa);
+    EVP_PKEY_CTX *keygenContext = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr);
+    EVP_PKEY *pKey = nullptr;
+    if (!keygenContext ||
+        EVP_PKEY_keygen_init(keygenContext) <= 0 ||
+        EVP_PKEY_CTX_set_rsa_keygen_bits(keygenContext, 2048) <= 0 ||
+        EVP_PKEY_keygen(keygenContext, &pKey) <= 0) {
+        qWarning() << "Could not generate RSA key";
+        EVP_PKEY_CTX_free(keygenContext);
+        return connData;
+    }
+    EVP_PKEY_CTX_free(keygenContext);
 
     // 2. set version of x509 req
     X509_REQ *x509_req = X509_REQ_new();
@@ -320,7 +326,7 @@ OpenVpnConfigurator::ConnectionData OpenVpnConfigurator::createCertRequest()
     connData.request = QByteArray(bio_buf->data, bio_buf->length);
     BIO_free(bio_req);
 
-    EVP_PKEY_free(pKey); // this will also free the rsa key
+    EVP_PKEY_free(pKey);
 
     return connData;
 }

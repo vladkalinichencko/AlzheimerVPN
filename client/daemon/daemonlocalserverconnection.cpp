@@ -8,6 +8,7 @@
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QLocalSocket>
+#include <QPointer>
 
 #include "daemon.h"
 #include "leakdetector.h"
@@ -71,7 +72,13 @@ void DaemonLocalServerConnection::readData() {
       continue;
     }
 
+    // Deactivation can close the socket and process deferred deletion in a
+    // nested event loop. Do not continue reading after that destroys us.
+    QPointer<DaemonLocalServerConnection> guard(this);
     parseCommand(command);
+    if (!guard) {
+      return;
+    }
   }
 }
 

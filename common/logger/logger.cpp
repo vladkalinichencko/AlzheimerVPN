@@ -142,7 +142,9 @@ QString Logger::getLogFile()
     }
     QFile file(userLogsFilePath());
 
-    file.open(QIODevice::ReadOnly);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return {};
+    }
     QString qtLog = file.readAll();
 
 #ifdef Q_OS_IOS
@@ -159,7 +161,9 @@ QString Logger::getServiceLogFile()
     }
     QFile file(serviceLogsFilePath());
 
-    file.open(QIODevice::ReadOnly);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return {};
+    }
     QString qtLog = file.readAll();
 
 #ifdef Q_OS_IOS
@@ -189,7 +193,13 @@ void Logger::clearLogs(bool isServiceLogger)
 
     QFile file(isServiceLogger ? serviceLogsFilePath() : userLogsFilePath());
 
-    file.open(QIODevice::WriteOnly | QIODevice::Truncate);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qWarning() << "Can't clear log file:" << file.fileName();
+        if (isLogActive) {
+            init(isServiceLogger);
+        }
+        return;
+    }
     file.resize(0);
     file.close();
 

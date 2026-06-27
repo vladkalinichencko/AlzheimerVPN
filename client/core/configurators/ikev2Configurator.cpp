@@ -107,7 +107,10 @@ QString Ikev2Configurator::genIkev2Config(const ConnectionData &connData)
 QString Ikev2Configurator::genMobileConfig(const ConnectionData &connData)
 {
     QFile file(":/server_scripts/ipsec/mobileconfig.plist");
-    file.open(QIODevice::ReadOnly);
+    if (!file.open(QIODevice::ReadOnly)) {
+        qWarning() << "Could not open mobileconfig template";
+        return {};
+    }
     QString config = QString(file.readAll());
 
     config.replace("$CLIENT_NAME", connData.clientId);
@@ -128,7 +131,10 @@ QString Ikev2Configurator::genMobileConfig(const ConnectionData &connData)
 QString Ikev2Configurator::genStrongSwanConfig(const ConnectionData &connData)
 {
     QFile file(":/server_scripts/ipsec/strongswan.profile");
-    file.open(QIODevice::ReadOnly);
+    if (!file.open(QIODevice::ReadOnly)) {
+        qWarning() << "Could not open strongSwan template";
+        return {};
+    }
     QString config = QString(file.readAll());
 
     config.replace("$CLIENT_NAME", connData.clientId);
