@@ -124,10 +124,24 @@ private:
    bool m_noTrafficRecoveryAttempted = false;
    bool m_silentReconnectInProgress = false;
    bool m_stoppingAfterFailure = false;
+   enum class PendingNetworkAction {
+       None,
+       StartConnection,
+       RequestReconnect,
+       StartSilentReconnect
+   };
+   PendingNetworkAction m_pendingNetworkAction = PendingNetworkAction::None;
    QString m_currentServerId;
    DockerContainer m_currentContainer = DockerContainer::None;
 
    void createProtocolConnections();
+   void connectServiceSignals();
+   void startConfiguredConnection();
+   bool deferUntilPhysicalNetworkReady(PendingNetworkAction action,
+                                       ConnectionHealth health);
+   bool physicalNetworkReady() const;
+   void onPhysicalNetworkReadyChanged(bool ready);
+   void resumePendingNetworkAction();
    void setConnectionHealth(ConnectionHealth health);
    bool shouldPublishConnectionHealth(ConnectionHealth health) const;
    void startConnectingWatchdog();

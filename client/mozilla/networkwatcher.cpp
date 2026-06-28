@@ -75,6 +75,8 @@ void NetworkWatcher::initialize() {
           &NetworkWatcher::networkChanged);
   connect(m_impl, &NetworkWatcherImpl::wakeup, this,
           &NetworkWatcher::wakeup);
+  connect(m_impl, &NetworkWatcherImpl::physicalNetworkReadyChanged, this,
+          &NetworkWatcher::physicalNetworkReadyChanged);
   m_impl->initialize();
 
   // Enable sleep/wake monitoring for VPN auto-reconnection
@@ -90,6 +92,10 @@ void NetworkWatcher::initialize() {
   }
   m_active = true;
   m_reportUnsecuredNetwork = false; // Disable unsecured network alerts for Amnezia
+}
+
+bool NetworkWatcher::physicalNetworkReady() const {
+  return m_impl == nullptr || m_impl->physicalNetworkReady();
 }
 
 void NetworkWatcher::settingsChanged() {

@@ -5,9 +5,6 @@
 #ifndef IOSNETWORKWATCHER_H
 #define IOSNETWORKWATCHER_H
 
-#include <atomic>
-#include <cstdint>
-
 #include <Network/Network.h>
 
 #include "networkwatcherimpl.h"
@@ -19,17 +16,10 @@ class IOSNetworkWatcher : public NetworkWatcherImpl {
 
   void initialize() override;
 
- protected:
-  bool networkPathReady() const;
-  uint64_t networkPathGeneration() const;
-  virtual void networkPathChanged(bool ready, uint64_t generation);
-
  private:
   NetworkWatcherImpl::TransportType toTransportType(nw_path_t path);
   void controllerStateChanged();
 
-  std::atomic_bool m_networkPathReady = false;
-  std::atomic_uint64_t m_networkPathGeneration = 0;
   NetworkWatcherImpl::TransportType m_currentDefaultTransport =
       NetworkWatcherImpl::TransportType_Unknown;
   NetworkWatcherImpl::TransportType m_currentVPNTransport =

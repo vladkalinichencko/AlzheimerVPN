@@ -30,10 +30,12 @@ public:
     void simulateDisconnection(bool simulatedDisconnection);
 
     QNetworkInformation::Reachability getReachability();
+    bool physicalNetworkReady() const;
 
 signals:
     void networkChanged();
     void wakeup();
+    void physicalNetworkReadyChanged(bool ready);
 
 private:
     void settingsChanged();

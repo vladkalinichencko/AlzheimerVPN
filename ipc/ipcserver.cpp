@@ -14,6 +14,7 @@
 #include <QStringList>
 
 #include "logger.h"
+#include "networkwatcher.h"
 #include "router.h"
 #include "killswitch.h"
 #include "xray.h"
@@ -26,6 +27,11 @@
 IpcServer::IpcServer(QObject *parent) : IpcInterfaceSource(parent)
 {
     connect(&m_pingHelper, &PingHelper::connectionLose, this, &IpcServer::connectionLose);
+}
+
+void IpcServer::setNetworkWatcher(NetworkWatcher* networkWatcher)
+{
+    m_networkWatcher = networkWatcher;
 }
 
 int IpcServer::createPrivilegedProcess()
@@ -248,6 +254,11 @@ bool IpcServer::stopNetworkCheck()
 
     m_pingHelper.stop();
     return true;
+}
+
+bool IpcServer::physicalNetworkReady()
+{
+    return m_networkWatcher == nullptr || m_networkWatcher->physicalNetworkReady();
 }
 
 bool IpcServer::resetKillSwitchAllowedRange(QStringList ranges)

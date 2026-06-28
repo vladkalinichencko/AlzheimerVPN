@@ -93,10 +93,11 @@ MacosRouteMonitor::MacosRouteMonitor(const QString& ifname, QObject* parent)
           &MacosRouteMonitor::rtsockReady);
 
   // Grab the default routes at startup.
-  rtmFetchRoutes(AF_INET);
-  rtmFetchRoutes(AF_INET6);
-  rtmFetchDefaultRoutes(AF_INET);
-  rtmFetchDefaultRoutes(AF_INET6);
+  if (!m_ifname.isEmpty()) {
+    rtmFetchRoutes(AF_INET);
+    rtmFetchRoutes(AF_INET6);
+  }
+  refreshPhysicalDefaultRoutes();
 }
 
 MacosRouteMonitor::~MacosRouteMonitor() {
@@ -110,6 +111,7 @@ MacosRouteMonitor::~MacosRouteMonitor() {
 
 void MacosRouteMonitor::handleRtmDelete(const struct rt_msghdr* rtm,
                                         const QByteArray& payload) {
+  const bool wasReady = hasPhysicalDefaultRoute();
   QList<QByteArray> addrlist = parseAddrList(payload);
 
   // Ignore routing changes on the tunnel interface.
@@ -130,9 +132,11 @@ void MacosRouteMonitor::handleRtmDelete(const struct rt_msghdr* rtm,
   if (isTunnelInterfaceName(ifname)) {
     return;
   }
-  logger.debug() << "Route deleted via" << ifname
-                 << QString("addrs(%1):").arg(rtm->rtm_addrs, 0, 16)
-                 << list.join(" ");
+  if (!m_ifname.isEmpty()) {
+    logger.debug() << "Route deleted via" << ifname
+                   << QString("addrs(%1):").arg(rtm->rtm_addrs, 0, 16)
+                   << list.join(" ");
+  }
 
   // We expect all useful routes to contain a destination, netmask and gateway.
   if (!(rtm->rtm_addrs & RTA_DST) || !(rtm->rtm_addrs & RTA_GATEWAY) ||
@@ -192,10 +196,12 @@ void MacosRouteMonitor::handleRtmDelete(const struct rt_msghdr* rtm,
       rtmSendRoute(RTM_DELETE, prefix, rtm->rtm_index, nullptr);
     }
   }
+  notifyPhysicalDefaultRouteChanged(wasReady);
 }
 
 void MacosRouteMonitor::handleRtmUpdate(const struct rt_msghdr* rtm,
                                         const QByteArray& payload) {
+  const bool wasReady = hasPhysicalDefaultRoute();
   QList<QByteArray> addrlist = parseAddrList(payload);
   int ifindex = rtm->rtm_index;
   char ifname[IF_NAMESIZE] = "null";
@@ -249,9 +255,11 @@ void MacosRouteMonitor::handleRtmUpdate(const struct rt_msghdr* rtm,
   if (isTunnelInterfaceName(ifname)) {
     return;
   }
-  logger.debug() << "Route update via" << ifname
-                 << QString("addrs(%1):").arg(rtm->rtm_addrs, 0, 16)
-                 << list.join(" ");
+  if (!m_ifname.isEmpty()) {
+    logger.debug() << "Route update via" << ifname
+                   << QString("addrs(%1):").arg(rtm->rtm_addrs, 0, 16)
+                   << list.join(" ");
+  }
 
   // Check for a default route, which should have a netmask of zero.
   const struct sockaddr* sa =
@@ -309,6 +317,33 @@ void MacosRouteMonitor::handleRtmUpdate(const struct rt_msghdr* rtm,
                      << prefix.toString();
       rtmSendRoute(rtm_type, prefix, ifindex, addrlist[1].constData());
     }
+  }
+  notifyPhysicalDefaultRouteChanged(wasReady);
+}
+
+bool MacosRouteMonitor::hasPhysicalDefaultRoute() const {
+  // WireGuard/AWG currently configures its endpoint from m_serverIpv4AddrIn,
+  // so an IPv6-only default route cannot carry the handshake.
+  return m_defaultIfindexIpv4 != 0 && !m_defaultGatewayIpv4.isEmpty();
+}
+
+void MacosRouteMonitor::refreshPhysicalDefaultRoutes() {
+  const bool wasReady = hasPhysicalDefaultRoute();
+
+  m_defaultGatewayIpv4.clear();
+  m_defaultGatewayIpv6.clear();
+  m_defaultIfindexIpv4 = 0;
+  m_defaultIfindexIpv6 = 0;
+
+  rtmFetchDefaultRoutes(AF_INET);
+  rtmFetchDefaultRoutes(AF_INET6);
+  notifyPhysicalDefaultRouteChanged(wasReady);
+}
+
+void MacosRouteMonitor::notifyPhysicalDefaultRouteChanged(bool wasReady) {
+  const bool ready = hasPhysicalDefaultRoute();
+  if (ready != wasReady) {
+    emit physicalDefaultRouteChanged(ready);
   }
 }
 

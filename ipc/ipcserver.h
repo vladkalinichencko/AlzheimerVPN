@@ -13,10 +13,13 @@
 
 #include "rep_ipc_interface_source.h"
 
+class NetworkWatcher;
+
 class IpcServer : public IpcInterfaceSource
 {
 public:
     explicit IpcServer(QObject *parent = nullptr);
+    void setNetworkWatcher(NetworkWatcher* networkWatcher);
     virtual int createPrivilegedProcess() override;
 
     virtual int routeAddList(const QString &gw, const QStringList &ips) override;
@@ -47,6 +50,7 @@ public:
     virtual bool xrayStop() override;
     virtual bool startNetworkCheck(const QString& serverIpv4Gateway, const QString& deviceIpv4Address) override;
     virtual bool stopNetworkCheck() override;
+    virtual bool physicalNetworkReady() override;
 
 private:
     int m_localpid = 0;
@@ -65,6 +69,7 @@ private:
 
     QMap<int, ProcessDescriptor> m_processes;
     PingHelper m_pingHelper;
+    NetworkWatcher* m_networkWatcher = nullptr;
 };
 
 #endif // IPCSERVER_H

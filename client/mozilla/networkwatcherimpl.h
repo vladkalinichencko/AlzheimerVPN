@@ -21,6 +21,7 @@ public:
 
     virtual void start() { m_active = true; }
     virtual void stop() { m_active = false; }
+    virtual bool physicalNetworkReady() const { return true; }
 
     bool isActive() const { return m_active; }
 
@@ -42,6 +43,7 @@ signals:
     // too.
     void networkChanged(QString newBSSID);
     void wakeup();
+    void physicalNetworkReadyChanged(bool ready);
 
 
 private:

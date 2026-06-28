@@ -50,8 +50,11 @@ LocalServer::LocalServer(QObject *parent) : QObject(parent),
     }
 
     m_networkWatcher.initialize();
+    m_ipcServer.setNetworkWatcher(&m_networkWatcher);
     connect(&m_networkWatcher, &NetworkWatcher::networkChanged, &m_ipcServer, &IpcServer::networkChanged);
     connect(&m_networkWatcher, &NetworkWatcher::wakeup, &m_ipcServer, &IpcServer::wakeup);
+    connect(&m_networkWatcher, &NetworkWatcher::physicalNetworkReadyChanged,
+            &m_ipcServer, &IpcServer::physicalNetworkReadyChanged);
     KillSwitch::instance()->init();
 
 #ifdef Q_OS_LINUX
@@ -77,4 +80,3 @@ LocalServer::~LocalServer()
 {
     qDebug() << "Local server stopped";
 }
-

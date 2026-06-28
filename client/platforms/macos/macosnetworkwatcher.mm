@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "macosnetworkwatcher.h"
+#include "daemon/macosroutemonitor.h"
 #include "leakdetector.h"
 #include "logger.h"
 
@@ -173,7 +174,7 @@ void PowerNotificationsListener::sleepWakeupCallBack(void *refParam, io_service_
         break;
 
     case kIOMessageSystemHasPoweredOn:
-        logger.debug() << "System has powered on - waiting for network path";
+        logger.debug() << "System has powered on - waiting for physical default route";
         if (listener->m_watcher) {
             QMetaObject::invokeMethod(listener->m_watcher, [watcher = listener->m_watcher]() {
                 watcher->requestWakeup();
@@ -188,29 +189,36 @@ void PowerNotificationsListener::sleepWakeupCallBack(void *refParam, io_service_
     }
 }
 
-MacOSNetworkWatcher::MacOSNetworkWatcher(QObject* parent) : IOSNetworkWatcher(parent), m_powerlistener(this) {
+MacOSNetworkWatcher::MacOSNetworkWatcher(QObject* parent)
+    : IOSNetworkWatcher(parent),
+      m_routeMonitor(new MacosRouteMonitor(QString(), this)),
+      m_powerlistener(this) {
   MZ_COUNT_CTOR(MacOSNetworkWatcher);
+  connect(m_routeMonitor, &MacosRouteMonitor::physicalDefaultRouteChanged,
+          this, &MacOSNetworkWatcher::physicalDefaultRouteChanged);
 }
 
 void MacOSNetworkWatcher::prepareForSleep() {
-  m_sleepPathGeneration.store(networkPathGeneration());
+  m_wakeupPending = false;
 }
 
 void MacOSNetworkWatcher::requestWakeup() {
   m_wakeupPending = true;
-  const uint64_t generation = networkPathGeneration();
-  if (networkPathReady() && generation > m_sleepPathGeneration.load()) {
-    networkPathChanged(true, generation);
-  }
+  m_routeMonitor->refreshPhysicalDefaultRoutes();
+  physicalDefaultRouteChanged(m_routeMonitor->hasPhysicalDefaultRoute());
 }
 
-void MacOSNetworkWatcher::networkPathChanged(bool ready, uint64_t generation) {
-  if (!ready || !m_wakeupPending || generation <= m_sleepPathGeneration.load()) {
-    return;
+bool MacOSNetworkWatcher::physicalNetworkReady() const {
+  return m_routeMonitor->hasPhysicalDefaultRoute();
+}
+
+void MacOSNetworkWatcher::physicalDefaultRouteChanged(bool ready) {
+  emit physicalNetworkReadyChanged(ready);
+  if (ready && m_wakeupPending) {
+    m_wakeupPending = false;
+    logger.debug() << "Physical default route ready after wakeup";
+    emit wakeup();
   }
-  m_wakeupPending = false;
-  logger.debug() << "Network path ready after wakeup";
-  emit wakeup();
 }
 
 MacOSNetworkWatcher::~MacOSNetworkWatcher() {

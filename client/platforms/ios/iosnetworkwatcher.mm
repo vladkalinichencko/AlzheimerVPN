@@ -33,12 +33,8 @@ void IOSNetworkWatcher::initialize() {
   nw_path_monitor_set_queue(m_networkMonitor, s_queue);
   nw_path_monitor_set_update_handler(m_networkMonitor, ^(nw_path_t _Nonnull path) {
     const auto transport = toTransportType(path);
-    const bool ready = nw_path_get_status(path) == nw_path_status_satisfied;
-    m_networkPathReady.store(ready);
-    const uint64_t generation = m_networkPathGeneration.fetch_add(1) + 1;
-    QMetaObject::invokeMethod(this, [this, transport, ready, generation]() {
+    QMetaObject::invokeMethod(this, [this, transport]() {
       m_currentDefaultTransport = transport;
-      networkPathChanged(ready, generation);
     }, Qt::QueuedConnection);
   });
   nw_path_monitor_start(m_networkMonitor);
@@ -47,19 +43,6 @@ void IOSNetworkWatcher::initialize() {
   this->start();
   
   //TODO IMPL FOR AMNEZIA
-}
-
-bool IOSNetworkWatcher::networkPathReady() const {
-  return m_networkPathReady.load();
-}
-
-uint64_t IOSNetworkWatcher::networkPathGeneration() const {
-  return m_networkPathGeneration.load();
-}
-
-void IOSNetworkWatcher::networkPathChanged(bool ready, uint64_t generation) {
-  Q_UNUSED(ready)
-  Q_UNUSED(generation)
 }
 
 NetworkWatcherImpl::TransportType IOSNetworkWatcher::toTransportType(nw_path_t path) {

@@ -32,7 +32,14 @@ class MacosRouteMonitor final : public QObject {
   bool deleteExclusionRoute(const IPAddress& prefix);
   void flushExclusionRoutes();
 
+  bool hasPhysicalDefaultRoute() const;
+  void refreshPhysicalDefaultRoutes();
+
+ signals:
+  void physicalDefaultRouteChanged(bool ready);
+
  private:
+  void notifyPhysicalDefaultRouteChanged(bool wasReady);
   void handleRtmDelete(const struct rt_msghdr* msg, const QByteArray& payload);
   void handleRtmUpdate(const struct rt_msghdr* msg, const QByteArray& payload);
   void handleIfaceInfo(const struct if_msghdr* msg, const QByteArray& payload);

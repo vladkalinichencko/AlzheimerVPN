@@ -639,6 +639,8 @@ void VpnConnection::connectToVpn(const QString &serverId, DockerContainer contai
     m_currentServerId = serverId;
     m_currentContainer = container;
     m_remoteAddress = NetworkUtilities::getIPAddress(vpnConfiguration.value(configKey::hostName).toString());
+    m_pendingNetworkAction = PendingNetworkAction::None;
+    connectServiceSignals();
     setConnectionState(Vpn::ConnectionState::Connecting);
 
     m_vpnConfiguration = vpnConfiguration;
@@ -654,10 +656,23 @@ void VpnConnection::connectToVpn(const QString &serverId, DockerContainer contai
 
     appendSplitTunnelingConfig();
 
+    if (deferUntilPhysicalNetworkReady(PendingNetworkAction::StartConnection,
+                                       ConnectionHealth::CheckingLocalNetwork)) {
+        return;
+    }
+
+    startConfiguredConnection();
+}
+
+void VpnConnection::startConfiguredConnection()
+{
+    m_pendingNetworkAction = PendingNetworkAction::None;
+    startConnectingWatchdog();
+
     QSharedPointer<VpnProtocol> protocol;
 
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && !defined(MACOS_NE)
-    protocol.reset(VpnProtocol::factory(container, m_vpnConfiguration));
+    protocol.reset(VpnProtocol::factory(m_currentContainer, m_vpnConfiguration));
     m_vpnProtocol = protocol;
     if (!protocol) {
         markLastError(ErrorCode::InternalError);
@@ -673,7 +688,7 @@ void VpnConnection::connectToVpn(const QString &serverId, DockerContainer contai
     m_vpnProtocol.reset(androidVpnProtocol);
     protocol = m_vpnProtocol;
 #elif defined Q_OS_IOS || defined(MACOS_NE)
-    Proto proto = ContainerUtils::defaultProtocol(container);
+    Proto proto = ContainerUtils::defaultProtocol(m_currentContainer);
     IosController::Instance()->connectVpn(proto, m_vpnConfiguration);
     connect(&m_checkTimer, &QTimer::timeout, IosController::Instance(), &IosController::checkStatus);
     return;
@@ -705,15 +720,22 @@ void VpnConnection::createProtocolConnections()
     connect(m_vpnProtocol.data(), &VpnProtocol::protocolError, this, &VpnConnection::onProtocolError);
     connect(m_vpnProtocol.data(), &VpnProtocol::connectionStateChanged, this, &VpnConnection::setConnectionState);
     connect(m_vpnProtocol.data(), SIGNAL(bytesChanged(quint64, quint64)), this, SLOT(onBytesChanged(quint64, quint64)));
+}
 
 #ifdef AMNEZIA_DESKTOP
+void VpnConnection::connectServiceSignals()
+{
     IpcClient::withInterface([this](QSharedPointer<IpcInterfaceReplica> rep) {
         const auto uniqueQueued = static_cast<Qt::ConnectionType>(int(Qt::QueuedConnection) | int(Qt::UniqueConnection));
         connect(rep.data(), &IpcInterfaceReplica::networkChanged, this, &VpnConnection::reconnectToVpn, uniqueQueued);
         connect(rep.data(), &IpcInterfaceReplica::wakeup, this, &VpnConnection::reconnectToVpn, uniqueQueued);
+        connect(rep.data(), &IpcInterfaceReplica::physicalNetworkReadyChanged,
+                this, &VpnConnection::onPhysicalNetworkReadyChanged, uniqueQueued);
     });
-#endif
 }
+#else
+void VpnConnection::connectServiceSignals() {}
+#endif
 
 void VpnConnection::appendKillSwitchConfig()
 {
@@ -896,13 +918,104 @@ QString VpnConnection::bytesPerSecToText(quint64 bytes)
     return QString("%1 %2").arg(QString::number(mbps, 'f', 2)).arg(tr("Mbps")); // Mbit/s
 }
 
+bool VpnConnection::physicalNetworkReady() const
+{
+#if defined(AMNEZIA_DESKTOP) && defined(Q_OS_MACOS)
+    bool queryCompleted = false;
+    bool ready = true;
+    IpcClient::withInterface([&](QSharedPointer<IpcInterfaceReplica> iface) {
+        auto reply = iface->physicalNetworkReady();
+        if (reply.waitForFinished()) {
+            ready = reply.returnValue();
+            queryCompleted = true;
+        }
+    });
+    if (!queryCompleted) {
+        qWarning() << "Unable to query physical network readiness; "
+                      "continuing so the local service can report its own error";
+    }
+    return ready;
+#else
+    return true;
+#endif
+}
+
+bool VpnConnection::deferUntilPhysicalNetworkReady(
+    PendingNetworkAction action, ConnectionHealth health)
+{
+    if (physicalNetworkReady()) {
+        return false;
+    }
+
+    m_pendingNetworkAction = action;
+    stopConnectingWatchdog();
+    stopConnectedRecovery();
+    stopConnectivityProbe();
+    setConnectionHealth(health);
+    qInfo() << "Waiting for a physical default route before VPN start";
+    QMetaObject::invokeMethod(this, &VpnConnection::resumePendingNetworkAction,
+                              Qt::QueuedConnection);
+    return true;
+}
+
+void VpnConnection::onPhysicalNetworkReadyChanged(bool ready)
+{
+    if (ready) {
+        resumePendingNetworkAction();
+    }
+}
+
+void VpnConnection::resumePendingNetworkAction()
+{
+    if (m_pendingNetworkAction == PendingNetworkAction::None ||
+        !physicalNetworkReady()) {
+        return;
+    }
+
+    const PendingNetworkAction action = m_pendingNetworkAction;
+    m_pendingNetworkAction = PendingNetworkAction::None;
+    qInfo() << "Physical default route is ready; resuming VPN start";
+
+    switch (action) {
+    case PendingNetworkAction::StartConnection:
+        if (m_connectionState == Vpn::ConnectionState::Connecting) {
+            startConfiguredConnection();
+        }
+        break;
+    case PendingNetworkAction::RequestReconnect:
+        if (m_connectionState == Vpn::ConnectionState::Connected) {
+            reconnectToVpn();
+        }
+        break;
+    case PendingNetworkAction::StartSilentReconnect:
+        if (m_connectionState == Vpn::ConnectionState::Connected) {
+            startSilentReconnect();
+        }
+        break;
+    case PendingNetworkAction::None:
+        break;
+    }
+}
+
 void VpnConnection::reconnectToVpn() {
     if (m_vpnProtocol.isNull())
         return;
 
+    if (m_silentReconnectInProgress ||
+        m_connectedRecoveryTimer.isActive() ||
+        m_pendingNetworkAction != PendingNetworkAction::None) {
+        qDebug() << "Reconnect request coalesced with an active recovery";
+        return;
+    }
+
     if (m_connectionState != Vpn::ConnectionState::Connected) {
         qWarning() << QString("Reconnect triggered on %1 during inappropriate state: %2; ignoring slot")
                               .arg(QMetaEnum::fromType<Vpn::ConnectionState>().valueToKey(m_connectionState));
+        return;
+    }
+
+    if (deferUntilPhysicalNetworkReady(PendingNetworkAction::RequestReconnect,
+                                       ConnectionHealth::Recovering)) {
         return;
     }
 
@@ -929,6 +1042,17 @@ void VpnConnection::reconnectToVpn() {
 
 void VpnConnection::startSilentReconnect()
 {
+    if (m_silentReconnectInProgress) {
+        qDebug() << "Silent reconnect already in progress";
+        return;
+    }
+    if (deferUntilPhysicalNetworkReady(
+            PendingNetworkAction::StartSilentReconnect,
+            ConnectionHealth::Recovering)) {
+        return;
+    }
+
+    m_pendingNetworkAction = PendingNetworkAction::None;
     qDebug() << "Reconnect triggered. Reconnecting to the server";
 
     stopConnectingWatchdog();
@@ -982,16 +1106,19 @@ void VpnConnection::disconnectFromVpn()
     disconnect(&m_checkTimer, &QTimer::timeout, IosController::Instance(), &IosController::checkStatus);
 #endif
 
-    if (m_vpnProtocol.isNull()) {
-        setConnectionState(Vpn::ConnectionState::Disconnected);
-        return;
-    }
-
+    m_pendingNetworkAction = PendingNetworkAction::None;
     m_silentReconnectInProgress = false;
     m_stoppingAfterFailure = false;
     m_connectedRecoveryAttempts = 0;
     m_noTrafficRecoveryAttempted = false;
     stopConnectedRecovery();
+    stopConnectingWatchdog();
+
+    if (m_vpnProtocol.isNull()) {
+        setConnectionState(Vpn::ConnectionState::Disconnected);
+        return;
+    }
+
     setConnectionState(Vpn::ConnectionState::Disconnecting);
 
 #ifdef Q_OS_ANDROID

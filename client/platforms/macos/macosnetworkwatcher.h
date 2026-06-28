@@ -15,6 +15,7 @@
 
 
 class QString;
+class MacosRouteMonitor;
 
 // Inspired by https://ladydebug.com/blog/2020/05/21/programmatically-capture-energy-saver-event-on-mac/
 class PowerNotificationsListener
@@ -45,15 +46,16 @@ class MacOSNetworkWatcher final : public IOSNetworkWatcher {
   bool checkInterface();
   void prepareForSleep();
   void requestWakeup();
+  bool physicalNetworkReady() const override;
 
   void controllerStateChanged();
 
  private:
-  void networkPathChanged(bool ready, uint64_t generation) override;
+  void physicalDefaultRouteChanged(bool ready);
 
   void* m_delegate = nullptr;
   bool m_wakeupPending = false;
-  std::atomic_uint64_t m_sleepPathGeneration = 0;
+  MacosRouteMonitor* m_routeMonitor = nullptr;
   PowerNotificationsListener m_powerlistener;
 };
 
