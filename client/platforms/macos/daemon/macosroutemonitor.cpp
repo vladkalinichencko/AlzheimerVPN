@@ -372,54 +372,63 @@ void MacosRouteMonitor::handleIfaceInfo(const struct if_msghdr* ifm,
 
 void MacosRouteMonitor::rtsockReady() {
   char buf[1024];
-  ssize_t len = recv(m_rtsock, buf, sizeof(buf), MSG_DONTWAIT);
-  if (len <= 0) {
-    return;
-  }
 
 #ifndef RTMSG_NEXT
 #  define RTMSG_NEXT(_rtm_) \
     (struct rt_msghdr*)((char*)(_rtm_) + (_rtm_)->rtm_msglen)
 #endif
 
-  struct rt_msghdr* rtm = reinterpret_cast<struct rt_msghdr*>(buf);
-  struct rt_msghdr* end = reinterpret_cast<struct rt_msghdr*>(&buf[len]);
-  while (rtm < end) {
-    // Ensure the message fits within the buffer
-    if (RTMSG_NEXT(rtm) > end) {
-      logger.debug() << "Routing message overflowed with length"
-                     << rtm->rtm_msglen;
-      break;
+  // PF_ROUTE can queue many updates while macOS restores routes after wake.
+  // Drain every pending message so the physical-default-route notification
+  // cannot remain unread until an unrelated later route change.
+  while (true) {
+    const ssize_t len = recv(m_rtsock, buf, sizeof(buf), MSG_DONTWAIT);
+    if (len < 0 && errno == EINTR) {
+      continue;
+    }
+    if (len <= 0) {
+      return;
     }
 
-    // Handle the routing message.
-    QByteArray message((char*)rtm, rtm->rtm_msglen);
-    switch (rtm->rtm_type) {
-      case RTM_ADD:
-        message.remove(0, sizeof(struct rt_msghdr));
-        handleRtmUpdate(rtm, message);
+    struct rt_msghdr* rtm = reinterpret_cast<struct rt_msghdr*>(buf);
+    struct rt_msghdr* end = reinterpret_cast<struct rt_msghdr*>(&buf[len]);
+    while (rtm < end) {
+      // Ensure the message fits within the buffer
+      if (RTMSG_NEXT(rtm) > end) {
+        logger.debug() << "Routing message overflowed with length"
+                       << rtm->rtm_msglen;
         break;
-      case RTM_DELETE:
-        message.remove(0, sizeof(struct rt_msghdr));
-        handleRtmDelete(rtm, message);
-        break;
-      case RTM_CHANGE:
-        message.remove(0, sizeof(struct rt_msghdr));
-        handleRtmUpdate(rtm, message);
-        break;
-      case RTM_GET:
-        message.remove(0, sizeof(struct rt_msghdr));
-        handleRtmUpdate(rtm, message);
-        break;
-      case RTM_IFINFO:
-        message.remove(0, sizeof(struct if_msghdr));
-        handleIfaceInfo((struct if_msghdr*)rtm, message);
-        break;
-      default:
-        break;
-    }
+      }
 
-    rtm = RTMSG_NEXT(rtm);
+      // Handle the routing message.
+      QByteArray message((char*)rtm, rtm->rtm_msglen);
+      switch (rtm->rtm_type) {
+        case RTM_ADD:
+          message.remove(0, sizeof(struct rt_msghdr));
+          handleRtmUpdate(rtm, message);
+          break;
+        case RTM_DELETE:
+          message.remove(0, sizeof(struct rt_msghdr));
+          handleRtmDelete(rtm, message);
+          break;
+        case RTM_CHANGE:
+          message.remove(0, sizeof(struct rt_msghdr));
+          handleRtmUpdate(rtm, message);
+          break;
+        case RTM_GET:
+          message.remove(0, sizeof(struct rt_msghdr));
+          handleRtmUpdate(rtm, message);
+          break;
+        case RTM_IFINFO:
+          message.remove(0, sizeof(struct if_msghdr));
+          handleIfaceInfo((struct if_msghdr*)rtm, message);
+          break;
+        default:
+          break;
+      }
+
+      rtm = RTMSG_NEXT(rtm);
+    }
   }
 }
 
