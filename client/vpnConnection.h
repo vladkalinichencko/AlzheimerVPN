@@ -102,6 +102,7 @@ private:
     QTimer m_connectingTimer;
     QTimer m_healthTimer;
     QTimer m_connectedRecoveryTimer;
+    QTimer m_pendingNetworkTimer;
     // Single debounced flushDns after the per-site route batch completes — the
     // previous design called flushDns once per resolved site and produced
     // hundreds of "Failed to flush DNS" warnings on configs with large split
@@ -146,6 +147,7 @@ private:
    bool shouldPublishConnectionHealth(ConnectionHealth health) const;
    void startConnectingWatchdog();
    void stopConnectingWatchdog();
+   void stopPendingNetworkAction();
    void startConnectedHealthCheck();
    void stopConnectedHealthCheck();
    void stopConnectedRecovery();

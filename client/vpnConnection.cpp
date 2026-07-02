@@ -91,7 +91,8 @@ VpnConnection::VpnConnection(SecureServersRepository* serversRepository, SecureA
       m_checkTimer(this),
       m_connectingTimer(this),
       m_healthTimer(this),
-      m_connectedRecoveryTimer(this)
+      m_connectedRecoveryTimer(this),
+      m_pendingNetworkTimer(this)
 {
     m_connectingTimer.setSingleShot(true);
     m_connectingTimer.setInterval(30000);
@@ -111,6 +112,10 @@ VpnConnection::VpnConnection(SecureServersRepository* serversRepository, SecureA
         }
         startSilentReconnect();
     });
+
+    m_pendingNetworkTimer.setInterval(1000);
+    connect(&m_pendingNetworkTimer, &QTimer::timeout,
+            this, &VpnConnection::resumePendingNetworkAction);
 
     m_dnsFlushDebounce.setSingleShot(true);
     m_dnsFlushDebounce.setInterval(500);
@@ -639,7 +644,7 @@ void VpnConnection::connectToVpn(const QString &serverId, DockerContainer contai
     m_currentServerId = serverId;
     m_currentContainer = container;
     m_remoteAddress = NetworkUtilities::getIPAddress(vpnConfiguration.value(configKey::hostName).toString());
-    m_pendingNetworkAction = PendingNetworkAction::None;
+    stopPendingNetworkAction();
     connectServiceSignals();
     setConnectionState(Vpn::ConnectionState::Connecting);
 
@@ -666,7 +671,7 @@ void VpnConnection::connectToVpn(const QString &serverId, DockerContainer contai
 
 void VpnConnection::startConfiguredConnection()
 {
-    m_pendingNetworkAction = PendingNetworkAction::None;
+    stopPendingNetworkAction();
     startConnectingWatchdog();
 
     QSharedPointer<VpnProtocol> protocol;
@@ -948,6 +953,7 @@ bool VpnConnection::deferUntilPhysicalNetworkReady(
     }
 
     m_pendingNetworkAction = action;
+    m_pendingNetworkTimer.start();
     stopConnectingWatchdog();
     stopConnectedRecovery();
     stopConnectivityProbe();
@@ -973,7 +979,7 @@ void VpnConnection::resumePendingNetworkAction()
     }
 
     const PendingNetworkAction action = m_pendingNetworkAction;
-    m_pendingNetworkAction = PendingNetworkAction::None;
+    stopPendingNetworkAction();
     qInfo() << "Physical default route is ready; resuming VPN start";
 
     switch (action) {
@@ -1052,7 +1058,7 @@ void VpnConnection::startSilentReconnect()
         return;
     }
 
-    m_pendingNetworkAction = PendingNetworkAction::None;
+    stopPendingNetworkAction();
     qDebug() << "Reconnect triggered. Reconnecting to the server";
 
     stopConnectingWatchdog();
@@ -1106,7 +1112,7 @@ void VpnConnection::disconnectFromVpn()
     disconnect(&m_checkTimer, &QTimer::timeout, IosController::Instance(), &IosController::checkStatus);
 #endif
 
-    m_pendingNetworkAction = PendingNetworkAction::None;
+    stopPendingNetworkAction();
     m_silentReconnectInProgress = false;
     m_stoppingAfterFailure = false;
     m_connectedRecoveryAttempts = 0;
@@ -1370,6 +1376,12 @@ void VpnConnection::startConnectingWatchdog()
 void VpnConnection::stopConnectingWatchdog()
 {
     m_connectingTimer.stop();
+}
+
+void VpnConnection::stopPendingNetworkAction()
+{
+    m_pendingNetworkAction = PendingNetworkAction::None;
+    m_pendingNetworkTimer.stop();
 }
 
 void VpnConnection::startConnectedHealthCheck()
