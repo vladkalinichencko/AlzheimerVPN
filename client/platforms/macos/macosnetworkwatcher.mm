@@ -209,6 +209,9 @@ void MacOSNetworkWatcher::requestWakeup() {
 }
 
 bool MacOSNetworkWatcher::physicalNetworkReady() const {
+  if (!m_routeMonitor->hasPhysicalDefaultRoute()) {
+    m_routeMonitor->refreshPhysicalDefaultRoutes();
+  }
   return m_routeMonitor->hasPhysicalDefaultRoute();
 }
 
