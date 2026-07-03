@@ -183,6 +183,18 @@ bool WireguardUtilsMacos::addInterface(const InterfaceConfig& config) {
   if (err != 0) {
     logger.error() << "Interface configuration failed:" << strerror(err);
   } else {
+    if (!MacOSFirewall::isInstalled()) {
+      MacOSFirewall::install();
+    }
+    MacOSFirewall::ensureRootAnchorPriority();
+    MacOSFirewall::setAnchorEnabled(QStringLiteral("250.blockIPv6"), true);
+    if (!MacOSFirewall::isInstalled() ||
+        !MacOSFirewall::isAnchorEnabled(QStringLiteral("250.blockIPv6"))) {
+      logger.error() << "Failed to enable IPv6 leak protection";
+      deleteInterface();
+      return false;
+    }
+
     if (config.m_killSwitchEnabled) {
       FirewallParams params { };
       params.dnsServers.append(config.m_primaryDnsServer);

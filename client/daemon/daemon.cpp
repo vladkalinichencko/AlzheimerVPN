@@ -272,6 +272,9 @@ bool Daemon::parseConfig(const QJsonObject& obj, InterfaceConfig& config) {
 
   config.m_deviceIpv4Address = obj.value("deviceIpv4Address").toString();
   config.m_deviceIpv6Address = obj.value("deviceIpv6Address").toString();
+#ifdef Q_OS_MACOS
+  config.m_deviceIpv6Address = QString();
+#endif
   if (config.m_deviceIpv4Address.isNull() &&
       config.m_deviceIpv6Address.isNull()) {
     logger.warning() << "no device addresses found in jsonConfig input";
@@ -373,8 +376,13 @@ bool Daemon::parseConfig(const QJsonObject& obj, InterfaceConfig& config) {
         return false;
       }
 
-      config.m_allowedIPAddressRanges.append(
-          IPAddress(QHostAddress(address.toString()), range.toInt()));
+      const QHostAddress hostAddress(address.toString());
+#ifdef Q_OS_MACOS
+      if (hostAddress.protocol() == QAbstractSocket::IPv6Protocol) {
+        continue;
+      }
+#endif
+      config.m_allowedIPAddressRanges.append(IPAddress(hostAddress, range.toInt()));
     }
 
     // Sort allowed IPs by decreasing prefix length.

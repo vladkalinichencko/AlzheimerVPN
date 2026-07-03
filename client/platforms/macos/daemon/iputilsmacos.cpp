@@ -35,7 +35,8 @@ IPUtilsMacos::~IPUtilsMacos() {
 }
 
 bool IPUtilsMacos::addInterfaceIPs(const InterfaceConfig& config) {
-  return addIP4AddressToDevice(config) && addIP6AddressToDevice(config);
+  return addIP4AddressToDevice(config) &&
+         (config.m_deviceIpv6Address.isEmpty() || addIP6AddressToDevice(config));
 }
 
 bool IPUtilsMacos::setMTUAndUp(const InterfaceConfig& config) {
