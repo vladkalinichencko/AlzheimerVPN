@@ -8,7 +8,7 @@ import os
 
 class AwgGo(ConanFile):
     name = "awg-go"
-    version = "0.2.16"
+    version = "0.2.18"
     package_type = "application"
     settings = "os", "arch"
     exports_sources = "patches/*"
@@ -43,7 +43,7 @@ class AwgGo(ConanFile):
 
     def source(self):
         get(self, f"https://github.com/amnezia-vpn/amneziawg-go/archive/refs/tags/v{self.version}.zip",
-            sha256="34da7d4189f215f3930de441548bc2a0c89d54d347a4fb85cb9c715fce6413aa", strip_root=True
+            sha256="58eefbd012e79bd1525f0e02d748979e9480acc1a339df8ceb3b9ffafcedb1ba", strip_root=True
         )
         patch(self, patch_file=os.path.join(self.export_sources_folder, "patches", "0001-allow-uapi-dir-env.patch"))
 
