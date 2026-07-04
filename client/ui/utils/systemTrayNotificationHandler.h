@@ -9,6 +9,7 @@
 
 #include "core/utils/connectionHealth.h"
 
+#include <QColor>
 #include <QMenu>
 #include <QSystemTrayIcon>
 
@@ -38,7 +39,8 @@ private:
     void updateTrayIcon();
     void onTrayActivated(QSystemTrayIcon::ActivationReason reason);
 
-    void setTrayIcon(const QString &iconPath, bool useNativeMask);
+    void setTrayIcon(const QString &iconPath, bool useNativeMask,
+                     qreal opacity = 1.0, const QColor &tint = QColor());
 
 private:
     QMenu m_menu;
@@ -53,7 +55,6 @@ private:
     QAction* m_separator = nullptr;
 
     const QString ConnectedTrayIconName = "active.png";
-    const QString DisconnectedTrayIconName = "default.png";
     const QString ErrorTrayIconName = "error.png";
     Vpn::ConnectionState m_connectionState = Vpn::ConnectionState::Disconnected;
     ConnectionHealth m_connectionHealth = ConnectionHealth::Idle;

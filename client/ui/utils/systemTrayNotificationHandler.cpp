@@ -13,6 +13,7 @@
 #include <QApplication>
 #include <QDesktopServices>
 #include <QIcon>
+#include <QPainter>
 #include <QWindow>
 
 #include "version.h"
@@ -77,9 +78,26 @@ void SystemTrayNotificationHandler::updateWebsiteUrl(const QString &newWebsiteUr
     websiteUrl = newWebsiteUrl;
 }
 
-void SystemTrayNotificationHandler::setTrayIcon(const QString &iconPath, bool useNativeMask)
+void SystemTrayNotificationHandler::setTrayIcon(const QString &iconPath, bool useNativeMask,
+                                                qreal opacity, const QColor &tint)
 {
-    QIcon trayIconMask(QPixmap(iconPath).scaled(128,128));
+    QPixmap styledPixmap = QPixmap(iconPath).scaled(128, 128, Qt::KeepAspectRatio,
+                                                   Qt::SmoothTransformation);
+    if (tint.isValid()) {
+        QPainter tintPainter(&styledPixmap);
+        tintPainter.setCompositionMode(QPainter::CompositionMode_SourceIn);
+        tintPainter.fillRect(styledPixmap.rect(), tint);
+    }
+    if (opacity < 1.0) {
+        QPixmap translucentPixmap(styledPixmap.size());
+        translucentPixmap.fill(Qt::transparent);
+        QPainter opacityPainter(&translucentPixmap);
+        opacityPainter.setOpacity(opacity);
+        opacityPainter.drawPixmap(0, 0, styledPixmap);
+        styledPixmap = translucentPixmap;
+    }
+
+    QIcon trayIconMask(styledPixmap);
     trayIconMask.setIsMask(useNativeMask);
     m_systemTrayIcon.setIcon(trayIconMask);
 }
@@ -146,17 +164,25 @@ void SystemTrayNotificationHandler::setTrayState(Vpn::ConnectionState state)
 void SystemTrayNotificationHandler::updateTrayIcon()
 {
     QString resourcesPath = ":/images/tray/%1";
-    QString iconName = DisconnectedTrayIconName;
+    QString iconName = ConnectedTrayIconName;
     bool useNativeMask = true;
+    qreal opacity = 0.45;
+    QColor tint;
 
     if (m_connectionState == Vpn::ConnectionState::Error || connectionHealthProblem(m_connectionHealth)) {
         iconName = ErrorTrayIconName;
         useNativeMask = false;
+        opacity = 1.0;
+    } else if (m_connectionState == Vpn::ConnectionState::Reconnecting ||
+               m_connectionHealth == ConnectionHealth::Recovering) {
+        useNativeMask = false;
+        opacity = 1.0;
+        tint = QColor(QStringLiteral("#F5B700"));
     } else if (m_connectionState == Vpn::ConnectionState::Connected) {
-        iconName = ConnectedTrayIconName;
+        opacity = 1.0;
     }
 
-    setTrayIcon(QString(resourcesPath).arg(iconName), useNativeMask);
+    setTrayIcon(QString(resourcesPath).arg(iconName), useNativeMask, opacity, tint);
 }
 
 
