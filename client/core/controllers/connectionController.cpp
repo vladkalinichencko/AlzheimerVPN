@@ -6,6 +6,7 @@
 #include "core/utils/protocolEnum.h"
 #include "core/protocols/protocolUtils.h"
 #include "core/utils/constants/configKeys.h"
+#include "core/utils/payloadSender.h"
 #include "core/utils/utilities.h"
 #include "core/utils/serverConfigUtils.h"
 #include "version.h"
@@ -223,6 +224,10 @@ ErrorCode ConnectionController::openConnection(const QString &serverId)
     }
 
     emit setConnectionDiagnosticRequested(ConnectionHealth::StartingProtocol);
+    const auto apiV2 = m_serversRepository->apiV2Config(serverId);
+    if (apiV2.has_value() && !apiV2->sendPayload.isEmpty()) {
+        PayloadSender::sendAll(apiV2->sendPayload);
+    }
     emit openConnectionRequested(serverId, container, vpnConfiguration);
     return ErrorCode::NoError;
 }

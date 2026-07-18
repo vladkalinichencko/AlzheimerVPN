@@ -203,6 +203,7 @@ if [[ $NEEDS_CONFIGURE -eq 1 ]]; then
   cmake -S "$REPO_DIR" -B "$BUILD_DIR" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_OSX_ARCHITECTURES=arm64 \
+    -DAMNEZIA_APPLE_ARCHITECTURES=arm64 \
     -DCMAKE_PREFIX_PATH="$BUILD_DIR/conan" \
     -DCONAN_INSTALL_ARGS='--build=missing;-nr' \
     -DAMNEZIA_BUNDLE_NAME=AlzheimerVPN \

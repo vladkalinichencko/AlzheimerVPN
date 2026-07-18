@@ -122,6 +122,7 @@ include(${CMAKE_CURRENT_LIST_DIR}/cmake/sources.cmake)
 include_directories(
     ${CMAKE_CURRENT_LIST_DIR}/../ipc
     ${CMAKE_CURRENT_LIST_DIR}/../common/logger
+    ${CMAKE_CURRENT_LIST_DIR}/../common/crypto
     ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}
 )
@@ -276,6 +277,10 @@ install(SCRIPT ${QT_DEPLOY_SCRIPT}
 
 if (APPLE AND NOT IOS AND NOT MACOS_NE)
     list(APPEND OVPN_SCRIPTS "${CMAKE_SOURCE_DIR}/deploy/data/macos/update-resolv-conf.sh")
+    set_target_properties(${PROJECT} PROPERTIES
+        XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "NO"
+        XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED "NO"
+    )
 endif()
 if (LINUX AND NOT ANDROID)
     list(APPEND OVPN_SCRIPTS "${CMAKE_SOURCE_DIR}/deploy/data/linux/update-resolv-conf.sh")

@@ -61,7 +61,6 @@ public:
     void toggleDevGatewayEnv(bool enabled);
     QByteArray readGatewayProxyUrls(const QString &cacheKey) const;
     void writeGatewayProxyUrls(const QString &cacheKey, const QByteArray &proxyUrlsEncrypted);
-    
     bool isKillSwitchEnabled() const;
     void setKillSwitchEnabled(bool enabled);
     bool isStrictKillSwitchEnabled() const;
