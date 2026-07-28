@@ -91,8 +91,8 @@ This fork updates Apple-platform build and runtime glue around the current imple
 - `IpcClient::async` helper replaces synchronous `waitForFinished()` for route, DNS, and connectivity probe paths. The previous nested-event-loop pattern recursed via `QHostInfo` callbacks on large split lists and crashed the client with `SIGBUS` at the stack guard.
 - DNS server routes (`dns1`/`dns2`) for `VpnAllExceptSites + VLESS/Xray` are installed through the TUN gateway. Upstream installed `/32` overrides via the LAN gateway and broke VPN-internal CGNAT resolvers such as `100.64.0.1`.
 - The fork installs its own privileged daemon (`AlzheimerVPN-service`) with its own `LaunchDaemon` plist and IPC socket, so the original Amnezia daemon is not replaced during development. Both daemons coexist; switching between apps does not require relaunching either daemon.
+- The fork uses its own `AlzheimerVPN-Keychain`. Denying Keychain access no longer looks like a missing key and cannot overwrite the original client's encrypted-settings key.
 - Daemon-side service logging is enabled unconditionally at process start, so daemon initialization failures are debuggable from `/var/log/AmneziaVPN/AlzheimerVPN-service.log` without needing the GUI to toggle logging first.
-- The install script seeds `Conf.installationUuid` from the original Amnezia preference plist on first fork launch, so the gateway recognizes an existing Premium account without requiring the user to re-import the profile.
 
 ## Where The Code Changed
 
@@ -159,57 +159,31 @@ Install:
 - Conan 2
 - Ninja or another CMake-supported generator
 
-Local macOS build:
+Build, package, verify, and install the ARM64 fork:
 
 ```bash
-export CONAN_HOME="$HOME/.conan2"
-cmake -S . -B /private/tmp/alzheimervpn-build \
-  -DCMAKE_BUILD_TYPE=Release
-cmake --build /private/tmp/alzheimervpn-build \
-  --target AmneziaVPN AlzheimerVPN-service -- -j4
+./scripts/build-and-install-alzheimervpn.sh
 ```
 
-Local macOS staging:
+To build and verify without replacing the installed fork:
 
 ```bash
-rm -rf /private/tmp/AlzheimerVPN.app
-cp -R /private/tmp/alzheimervpn-build/client/AmneziaVPN.app \
-  /private/tmp/AlzheimerVPN.app
-
-cp /private/tmp/alzheimervpn-build/service/server/AlzheimerVPN-service \
-  /private/tmp/AlzheimerVPN.app/Contents/MacOS/AlzheimerVPN-service
-cp /private/tmp/alzheimervpn-build/service/server/amneziawg-go \
-  /private/tmp/AlzheimerVPN.app/Contents/MacOS/amneziawg-go
-cp /private/tmp/alzheimervpn-build/service/server/openvpn \
-  /private/tmp/AlzheimerVPN.app/Contents/MacOS/openvpn
-cp /private/tmp/alzheimervpn-build/service/server/tun2socks \
-  /private/tmp/AlzheimerVPN.app/Contents/MacOS/tun2socks
-cp /private/tmp/alzheimervpn-build/service/server/geoip.dat \
-  /private/tmp/AlzheimerVPN.app/Contents/MacOS/geoip.dat
-cp /private/tmp/alzheimervpn-build/service/server/geosite.dat \
-  /private/tmp/AlzheimerVPN.app/Contents/MacOS/geosite.dat
-
-chmod 755 \
-  /private/tmp/AlzheimerVPN.app/Contents/MacOS/AlzheimerVPN-service \
-  /private/tmp/AlzheimerVPN.app/Contents/MacOS/amneziawg-go \
-  /private/tmp/AlzheimerVPN.app/Contents/MacOS/openvpn \
-  /private/tmp/AlzheimerVPN.app/Contents/MacOS/tun2socks
+./scripts/build-and-install-alzheimervpn.sh --no-install
 ```
 
-The staged bundle is not valid without those service-side runtime files. If
-`amneziawg-go` is missing from `Contents/MacOS`, connection attempts fail as
-`ErrorCode: 706. Local VPN service failed`.
-
-Repository build scripts:
-
-```bash
-deploy/build.sh
-deploy/build.sh --installer all
-```
+The script stages `/private/tmp/AlzheimerVPN.app`, restores the Conan OpenSSL
+libraries after `macdeployqt`, verifies that every VPN executable is ARM64-only,
+checks bundle signing and external library paths, and starts the GUI binary with
+`--version` so unresolved loader symbols fail the build before installation.
 
 ## Live Validation
 
 Premium validation needs the same activated profile data that the normal app uses. A fork bundle with only copied split-tunnel lists can show the right rules while still failing account-backed configuration retrieval.
+
+Restore an exported Amnezia `.backup` through **Settings → Backup → Restore
+from backup** after the first fork launch. The original client and the fork use
+separate Keychain entries, so copying encrypted preference values directly does
+not transfer a usable profile.
 
 Check these preference keys when validating a fork build against an existing Premium setup:
 
@@ -241,12 +215,13 @@ ls -l /Applications/AlzheimerVPN.app/Contents/MacOS/amneziawg-go \
   /Applications/AlzheimerVPN.app/Contents/MacOS/geosite.dat
 ```
 
-## Upstream Shape
+## Upstream 5.0.0.5
 
-The useful upstream work can be reviewed in three areas.
-
-First, connection diagnostics: health states, structured failure logs, watchdog behavior, and filtering that keeps stale diagnostics out of the UI.
-
-Second, split tunneling: hostname normalization, DNS prewarm on connection setup, all-IPv4 route installation, wildcard DNS observation, active-session DNS lease retention, Xray domain fallback routing, and kill-switch synchronization.
-
-Third, Apple platform support: macOS build settings, native lifecycle cleanup, configurable naming, and the daemon-side route/firewall pieces needed for reliable split tunneling.
+The current fork is based on upstream `5.0.0.5`. That update adds AWG3
+configuration across desktop and mobile backends, passes persistent keepalive
+through the userspace WireGuard API, updates the bundled AWG implementations,
+and fixes empty legacy AWG parameters. It also includes the mobile update
+dialog, Android 16 KB page support and netlink fixes, a macOS Network Extension
+Keychain-path fix, PF resources in debug builds, and several connection/setup UI
+fixes. Fork-specific split tunneling, diagnostics, service isolation, and the
+ARM64-only packaging path remain layered on top.

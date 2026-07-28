@@ -14,10 +14,14 @@
 
 using namespace QKeychain;
 
+#ifndef AMNEZIA_KEYCHAIN_NAME
+#define AMNEZIA_KEYCHAIN_NAME "AmneziaVPN-Keychain"
+#endif
+
 namespace {
     constexpr const char *settingsKeyTag = "settingsKeyTag";
     constexpr const char *settingsIvTag = "settingsIvTag";
-    constexpr const char *keyChainName = "AmneziaVPN-Keychain";
+    constexpr const char *keyChainName = AMNEZIA_KEYCHAIN_NAME;
 }
 
 SecureQSettings::SecureQSettings(const QString &organization, const QString &application, QObject *parent, bool enableEncryption)
@@ -214,9 +218,13 @@ QByteArray SecureQSettings::getEncKey() const
         return m_key;
     }
     // load keys from system key storage
-    m_key = getSecTag(settingsKeyTag);
+    Error error = NoError;
+    m_key = getSecTag(settingsKeyTag, &error);
 
-    if (m_key.isEmpty()) {
+    if (error != NoError && error != EntryNotFound) {
+        return {};
+    }
+    if (error == EntryNotFound) {
         // Create new key
         QByteArray key = CryptoUtils::generateRandomBytes(32);
         if (key.isEmpty()) {
@@ -242,9 +250,13 @@ QByteArray SecureQSettings::getEncIv() const
         return m_iv;
     }
     // load keys from system key storage
-    m_iv = getSecTag(settingsIvTag);
+    Error error = NoError;
+    m_iv = getSecTag(settingsIvTag, &error);
 
-    if (m_iv.isEmpty()) {
+    if (error != NoError && error != EntryNotFound) {
+        return {};
+    }
+    if (error == EntryNotFound) {
         // Create new IV
         QByteArray iv = CryptoUtils::generateRandomBytes(32);
         if (iv.isEmpty()) {
@@ -263,7 +275,7 @@ QByteArray SecureQSettings::getEncIv() const
     return m_iv;
 }
 
-QByteArray SecureQSettings::getSecTag(const QString &tag)
+QByteArray SecureQSettings::getSecTag(const QString &tag, Error *error)
 {
     auto job = QSharedPointer<ReadPasswordJob>(new ReadPasswordJob(keyChainName), &QObject::deleteLater);
     job->setAutoDelete(false);
@@ -275,6 +287,9 @@ QByteArray SecureQSettings::getSecTag(const QString &tag)
 
     if (job->error()) {
         qCritical() << "SecureQSettings::getSecTag Error:" << job->errorString();
+    }
+    if (error) {
+        *error = job->error();
     }
 
     return job->binaryData();

@@ -34,6 +34,7 @@ KEY2_ESC="/private/tmp/agw_key_2.escaped"
 CONAN_WRAPPER="/private/tmp/conan-wrapper"
 
 FORK_SERVICE_NAME="AlzheimerVPN-service"
+FORK_KEYCHAIN_NAME="AlzheimerVPN-Keychain"
 FORK_PLIST_PATH="/Library/LaunchDaemons/AlzheimerVPN.plist"
 FORK_LAUNCHCTL_LABEL="system/AlzheimerVPN-service"
 FORK_IPC_URL="local:AlzheimerVpnIpcInterface"
@@ -170,6 +171,7 @@ else
   CACHED_PROD_LEN=$(awk -F= '/^PROD_AGW_PUBLIC_KEY:/{print length($2)}' "$BUILD_DIR/CMakeCache.txt")
   CACHED_DEV_LEN=$(awk -F= '/^DEV_AGW_PUBLIC_KEY:/{print length($2)}'  "$BUILD_DIR/CMakeCache.txt")
 CACHED_SERVICE=$(awk -F= '/^AMNEZIA_SERVICE_NAME:/{print $2}' "$BUILD_DIR/CMakeCache.txt")
+CACHED_KEYCHAIN=$(awk -F= '/^AMNEZIA_KEYCHAIN_NAME:/{print $2}' "$BUILD_DIR/CMakeCache.txt")
 CACHED_APP_NAME=$(awk -F= '/^AMNEZIA_APPLICATION_NAME:/{print $2}' "$BUILD_DIR/CMakeCache.txt")
 CACHED_ORGANIZATION=$(awk -F= '/^AMNEZIA_ORGANIZATION_NAME:/{print $2}' "$BUILD_DIR/CMakeCache.txt")
 CACHED_BUNDLE=$(awk -F= '/^AMNEZIA_BUNDLE_NAME:/{print $2}' "$BUILD_DIR/CMakeCache.txt")
@@ -183,6 +185,7 @@ CACHED_XRAY_TUN=$(awk -F= '/^AMNEZIA_XRAY_TUN_NAME:/{print $2}' "$BUILD_DIR/CMak
   if [[ -z "${CACHED_PROD_LEN:-}" || -z "${CACHED_DEV_LEN:-}" \
         || $CACHED_PROD_LEN -lt 400 || $CACHED_DEV_LEN -lt 400 \
         || "$CACHED_SERVICE" != "$FORK_SERVICE_NAME" \
+        || "$CACHED_KEYCHAIN" != "$FORK_KEYCHAIN_NAME" \
         || "$CACHED_APP_NAME" != "AmneziaVPN" \
         || "$CACHED_ORGANIZATION" != "AmneziaVPN.ORG" \
         || "$CACHED_BUNDLE" != "AlzheimerVPN" \
@@ -208,6 +211,7 @@ if [[ $NEEDS_CONFIGURE -eq 1 ]]; then
     -DCONAN_INSTALL_ARGS='--build=missing;-nr' \
     -DAMNEZIA_BUNDLE_NAME=AlzheimerVPN \
     -DAMNEZIA_SERVICE_NAME="$FORK_SERVICE_NAME" \
+    -DAMNEZIA_KEYCHAIN_NAME="$FORK_KEYCHAIN_NAME" \
     -DBUILD_OSX_APP_IDENTIFIER=org.alzheimervpn.AlzheimerVPN \
     -DAMNEZIA_INSTANCE_SERVER_NAME="$FORK_INSTANCE_NAME" \
     -DAMNEZIA_IPC_SERVICE_URL="$FORK_IPC_URL" \
@@ -225,7 +229,7 @@ else
   echo "Cache OK, skipping reconfigure (use --reconfigure to force)."
 fi
 
-awk -F= '/^(PROD_AGW_PUBLIC_KEY|DEV_AGW_PUBLIC_KEY|PROD_S3_ENDPOINT|FALLBACK_S3_ENDPOINT|DEV_AGW_ENDPOINT|DEV_S3_ENDPOINT|AMNEZIA_BUNDLE_NAME|AMNEZIA_APPLICATION_NAME|AMNEZIA_ORGANIZATION_NAME|AMNEZIA_SERVICE_NAME|AMNEZIA_IPC_SERVICE_URL|AMNEZIA_DAEMON_RUN_DIR|AMNEZIA_WG_RUNTIME_DIR|AMNEZIA_DAEMON_TMP_SOCKET|AMNEZIA_XRAY_TUN_NAME):/ { split($1,a,":"); print a[1] "=" (length($2) > 60 ? "length=" length($2) : $2) }' "$BUILD_DIR/CMakeCache.txt"
+awk -F= '/^(PROD_AGW_PUBLIC_KEY|DEV_AGW_PUBLIC_KEY|PROD_S3_ENDPOINT|FALLBACK_S3_ENDPOINT|DEV_AGW_ENDPOINT|DEV_S3_ENDPOINT|AMNEZIA_BUNDLE_NAME|AMNEZIA_APPLICATION_NAME|AMNEZIA_ORGANIZATION_NAME|AMNEZIA_SERVICE_NAME|AMNEZIA_KEYCHAIN_NAME|AMNEZIA_IPC_SERVICE_URL|AMNEZIA_DAEMON_RUN_DIR|AMNEZIA_WG_RUNTIME_DIR|AMNEZIA_DAEMON_TMP_SOCKET|AMNEZIA_XRAY_TUN_NAME):/ { split($1,a,":"); print a[1] "=" (length($2) > 60 ? "length=" length($2) : $2) }' "$BUILD_DIR/CMakeCache.txt"
 
 # --- 4. Build.
 step "Build"
@@ -257,9 +261,10 @@ cp "$BUILD_DIR/service/server/geosite.dat"        "$STAGE_APP/Contents/MacOS/geo
 cp "$BUILD_DIR/service/server/amneziawg-go"        "$STAGE_APP/Contents/MacOS/wireguard-go"
 
 QT_BIN_DIR="$(qtpaths --query QT_INSTALL_BINS)"
+QT_LIB_DIR="$(qtpaths --query QT_INSTALL_LIBS)"
 "$QT_BIN_DIR/macdeployqt" "$STAGE_APP" \
   -executable="$STAGE_APP/Contents/MacOS/$FORK_SERVICE_NAME" \
-  -qmldir="$REPO_DIR/client" -no-codesign -always-overwrite
+  -qmldir="$REPO_DIR/client/ui/qml" -libpath="$QT_LIB_DIR" -no-codesign -always-overwrite
 
 # macdeployqt can otherwise substitute Homebrew OpenSSL for the Conan build
 # used at link time. That mismatch is the source of the macOS 26.6 _deflate
@@ -322,6 +327,8 @@ cat >"$STAGE_APP/Contents/Resources/$FORK_SERVICE_NAME.plist" <<EOF
 EOF
 xattr -cr "$STAGE_APP"
 codesign --force --deep --sign - "$STAGE_APP"
+codesign --verify --deep --strict "$STAGE_APP"
+"$STAGE_APP/Contents/MacOS/AmneziaVPN" --version >/dev/null
 
 echo "Staged contents:"
 find "$STAGE_APP/Contents/MacOS" -maxdepth 1 -type f -print | sort

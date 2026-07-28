@@ -240,6 +240,9 @@ bool WireguardUtilsMacos::addInterface(const InterfaceConfig& config) {
               params.blockAddrs.append(net.toString());
           }
       }
+      if (params.allowNets) {
+          KillSwitch::instance()->resetAllowedRange(params.allowAddrs);
+      }
       applyFirewallRules(params);
     }
   }
