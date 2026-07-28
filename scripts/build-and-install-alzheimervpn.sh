@@ -252,7 +252,35 @@ cp "$BUILD_DIR/service/server/openvpn"            "$STAGE_APP/Contents/MacOS/ope
 cp "$BUILD_DIR/service/server/tun2socks"          "$STAGE_APP/Contents/MacOS/tun2socks"
 cp "$BUILD_DIR/service/server/geoip.dat"          "$STAGE_APP/Contents/MacOS/geoip.dat"
 cp "$BUILD_DIR/service/server/geosite.dat"        "$STAGE_APP/Contents/MacOS/geosite.dat"
-cp "$ORIGINAL_APP/Contents/MacOS/wireguard-go"    "$STAGE_APP/Contents/MacOS/wireguard-go"
+# Upstream 5.0 uses amneziawg-go for both protocols. Keep the fork's
+# protocol-specific filename while using the same ARM64 backend.
+cp "$BUILD_DIR/service/server/amneziawg-go"        "$STAGE_APP/Contents/MacOS/wireguard-go"
+
+QT_BIN_DIR="$(qtpaths --query QT_INSTALL_BINS)"
+"$QT_BIN_DIR/macdeployqt" "$STAGE_APP" \
+  -executable="$STAGE_APP/Contents/MacOS/$FORK_SERVICE_NAME" \
+  -qmldir="$REPO_DIR/client" -no-codesign -always-overwrite
+
+# macdeployqt can otherwise substitute Homebrew OpenSSL for the Conan build
+# used at link time. That mismatch is the source of the macOS 26.6 _deflate
+# launch failure.
+OPENSSL_PACKAGE_DIR="$(sed -n 's/^set(openssl_PACKAGE_FOLDER_RELEASE "\(.*\)")/\1/p' "$BUILD_DIR/conan/OpenSSL-Targets-release.cmake")"
+[[ -d "$OPENSSL_PACKAGE_DIR/lib" ]] || { echo "Conan OpenSSL package not found." >&2; exit 1; }
+cp "$OPENSSL_PACKAGE_DIR/lib/libssl.3.dylib" "$STAGE_APP/Contents/Frameworks/"
+cp "$OPENSSL_PACKAGE_DIR/lib/libcrypto.3.dylib" "$STAGE_APP/Contents/Frameworks/"
+
+for executable in AmneziaVPN "$FORK_SERVICE_NAME"; do
+  executable="$STAGE_APP/Contents/MacOS/$executable"
+  if otool -l "$executable" | awk '/cmd LC_RPATH/{getline; getline; print $2}' | grep -x /opt/homebrew/lib >/dev/null; then
+    install_name_tool -delete_rpath /opt/homebrew/lib "$executable"
+  fi
+  if otool -L "$executable" | grep '/opt/homebrew/' >/dev/null; then
+    echo "$executable still links to Homebrew libraries." >&2
+    exit 1
+  fi
+done
+nm -gU "$STAGE_APP/Contents/Frameworks/libcrypto.3.dylib" | grep ' _deflate$' >/dev/null \
+  || { echo "Staged libcrypto does not satisfy the app's zlib symbols." >&2; exit 1; }
 
 # PF (packet filter) rules — MacOSFirewall expects them at
 # $BUNDLE/Contents/MacOS/pf/amn.conf + amn.NNN.*.conf. Upstream Amnezia ships
@@ -265,6 +293,8 @@ cp -R "$REPO_DIR/deploy/data/macos/pf" "$STAGE_APP/Contents/MacOS/pf"
 
 for bin in AmneziaVPN "$FORK_SERVICE_NAME" amneziawg-go wireguard-go openvpn tun2socks; do
   chmod 755 "$STAGE_APP/Contents/MacOS/$bin"
+  [[ "$(lipo -archs "$STAGE_APP/Contents/MacOS/$bin")" == "arm64" ]] \
+    || { echo "$bin is not ARM64-only." >&2; exit 1; }
 done
 [[ -f "$STAGE_APP/Contents/MacOS/update-resolv-conf.sh" ]] && chmod 755 "$STAGE_APP/Contents/MacOS/update-resolv-conf.sh"
 

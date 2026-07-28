@@ -47,9 +47,7 @@ bool ConnectionController::isConnected() const
 
 void ConnectionController::setConnectionState(Vpn::ConnectionState state)
 {
-    if (m_vpnConnection) {
-        emit setConnectionStateRequested(state);
-    }
+    emit connectionStateChanged(state);
 }
 
 ErrorCode ConnectionController::defaultContainerForServer(const QString &serverId, DockerContainer &container) const
