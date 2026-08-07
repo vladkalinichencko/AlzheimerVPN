@@ -31,6 +31,8 @@ MacOSDaemon::MacOSDaemon() : Daemon(nullptr) {
   m_wgutils = new WireguardUtilsMacos(this);
   m_dnsutils = new DnsUtilsMacos(this);
   m_iputils = new IPUtilsMacos(this);
+  connect(m_dnsutils, &DnsUtils::splitTunnelHostResolved,
+          this, &MacOSDaemon::onSplitTunnelHostResolved);
 
   Q_ASSERT(s_daemon == nullptr);
   s_daemon = this;

@@ -68,8 +68,6 @@ class Daemon : public QObject {
   void refreshSplitTunnelStaticRoutes(const QStringList& addresses);
   void clearSplitTunnelDnsRoutes();
   void refreshSplitTunnelDnsRoutes();
-  void onSplitTunnelHostResolved(const QString& host, const QStringList& ips);
-
  protected:
   virtual bool run(Op op, const InterfaceConfig& config) {
     Q_UNUSED(op);
@@ -82,6 +80,7 @@ class Daemon : public QObject {
   virtual bool supportIPUtils() const { return false; }
   virtual IPUtils* iputils() { return nullptr; }
   virtual DnsUtils* dnsutils() { return nullptr; }
+  void onSplitTunnelHostResolved(const QString& host, const QStringList& ips);
 
   static bool parseStringList(const QJsonObject& obj, const QString& name,
                               QStringList& list);

@@ -66,7 +66,14 @@ DnsUtilsMacos::DnsUtilsMacos(QObject* parent) : DnsUtils(parent) {
 
   logger.debug() << "DnsUtilsMacos created.";
   connect(&m_splitRouteObserver, &DnsSplitRouteObserver::hostResolved,
-          this, &DnsUtilsMacos::splitTunnelHostResolvedWithTtl);
+          this, [this](const QString& host, const QList<amnezia::DnsIpv4Answer>& answers) {
+            QStringList ips;
+            for (const amnezia::DnsIpv4Answer& answer : answers) {
+              ips.append(answer.address);
+            }
+            emit splitTunnelHostResolved(host, ips);
+            emit splitTunnelHostResolvedWithTtl(host, answers);
+          });
 }
 
 DnsUtilsMacos::~DnsUtilsMacos() {
