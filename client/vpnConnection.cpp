@@ -472,9 +472,11 @@ void VpnConnection::addSitesRoutes(const QString &gw, amnezia::RouteMode mode)
             ips.append(rule.normalizedText());
         } else {
             ++hostRules;
-            const QString cachedIp = i.value().toString().trimmed();
-            if (NetworkUtilities::checkIpSubnetFormat(cachedIp)) {
-                ips.append(cachedIp);
+            const QStringList siteIps = SecureAppSettingsRepository::siteIpList(i.value());
+            for (const QString &ip : siteIps) {
+                if (NetworkUtilities::checkIpSubnetFormat(ip)) {
+                    ips.append(ip);
+                }
             }
         }
     }
@@ -791,12 +793,13 @@ void VpnConnection::appendSplitTunnelingConfig()
             auto nativeConfig = configData.value(configKey::config).toString();
             auto nativeConfigLines = nativeConfig.split("\n");
             for (auto &line : nativeConfigLines) {
-                if (line.contains("AllowedIPs")) {
-                    auto allowedIpsString = line.split(" = ");
-                    if (allowedIpsString.size() < 1) {
-                        break;
+                auto allowedIpsString = line.split("=", Qt::KeepEmptyParts);
+                if (allowedIpsString.size() >= 2 && allowedIpsString.first().trimmed() == QStringLiteral("AllowedIPs")) {
+                    QJsonArray allowedIpsJsonArray;
+                    const QString allowedIps = allowedIpsString.mid(1).join(QStringLiteral("=")).trimmed();
+                    for (const QString &allowedIp : allowedIps.split(",", Qt::SkipEmptyParts)) {
+                        allowedIpsJsonArray.append(allowedIp.trimmed());
                     }
-                    QJsonArray allowedIpsJsonArray = QJsonArray::fromStringList(allowedIpsString.at(1).split(", "));
                     configData.insert(configKey::allowedIps, allowedIpsJsonArray);
                     m_vpnConfiguration.insert(protocolName + "_config_data", configData);
                     break;
@@ -808,12 +811,12 @@ void VpnConnection::appendSplitTunnelingConfig()
             auto nativeConfig = configData.value(configKey::config).toString();
             auto nativeConfigLines = nativeConfig.split("\n");
             for (auto &line : nativeConfigLines) {
-                if (line.contains("PersistentKeepalive")) {
-                    auto persistentKeepaliveString = line.split(" = ");
-                    if (persistentKeepaliveString.size() > 1) {
-                        configData.insert(configKey::persistentKeepAlive, persistentKeepaliveString.at(1));
-                        m_vpnConfiguration.insert(protocolName + "_config_data", configData);
-                    }
+                auto persistentKeepaliveString = line.split("=", Qt::KeepEmptyParts);
+                if (persistentKeepaliveString.size() >= 2
+                        && persistentKeepaliveString.first().trimmed() == QStringLiteral("PersistentKeepalive")) {
+                    configData.insert(configKey::persistentKeepAlive,
+                                      persistentKeepaliveString.mid(1).join(QStringLiteral("=")).trimmed());
+                    m_vpnConfiguration.insert(protocolName + "_config_data", configData);
                     break;
                 }
             }
@@ -838,13 +841,18 @@ void VpnConnection::appendSplitTunnelingConfig()
             const QVariantMap &m = m_appSettingsRepository->vpnSites(routeMode);
             for (auto i = m.constBegin(); i != m.constEnd(); ++i) {
                 const QString &ruleText = i.key();
-                if (NetworkUtilities::checkIpSubnetFormat(ruleText)) {
-                    sites.append(ruleText);
-                    continue;
-                }
                 const amnezia::SplitTunnelRule rule = amnezia::SplitTunnelRule::fromText(ruleText);
                 if (!rule.isValid()) {
                     continue;
+                }
+                if (rule.type() == amnezia::SplitTunnelRule::Type::IpSubnet) {
+                    sites.append(rule.normalizedText());
+                    continue;
+                }
+                for (const QString &ip : SecureAppSettingsRepository::siteIpList(i.value())) {
+                    if (NetworkUtilities::checkIpSubnetFormat(ip)) {
+                        sites.append(ip);
+                    }
                 }
                 if (rule.isDynamicHostRule()) {
                     hasDynamicHostRules = true;

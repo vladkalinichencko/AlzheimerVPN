@@ -215,13 +215,10 @@ ls -l /Applications/AlzheimerVPN.app/Contents/MacOS/amneziawg-go \
   /Applications/AlzheimerVPN.app/Contents/MacOS/geosite.dat
 ```
 
-## Upstream 5.0.0.5
+## Upstream 5.0.1.5
 
-The current fork is based on upstream `5.0.0.5`. That update adds AWG3
-configuration across desktop and mobile backends, passes persistent keepalive
-through the userspace WireGuard API, updates the bundled AWG implementations,
-and fixes empty legacy AWG parameters. It also includes the mobile update
-dialog, Android 16 KB page support and netlink fixes, a macOS Network Extension
-Keychain-path fix, PF resources in debug builds, and several connection/setup UI
-fixes. Fork-specific split tunneling, diagnostics, service isolation, and the
+The current fork is based on upstream `5.0.1.5`. This release adds AWG 3.1,
+custom branding support, native macOS status items, and fixes for imported
+configs, VPN routes, split-tunneling subnets, IPC validation, and XRay/Telemt.
+Fork-specific hostname split tunneling, diagnostics, service isolation, and the
 ARM64-only packaging path remain layered on top.

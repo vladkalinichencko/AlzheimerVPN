@@ -1,15 +1,18 @@
 #include <QDebug>
 #include <QTimer>
 #include <libssh/libssh.h>
+#include <openssl/ssl.h>
 
 #include "amneziaApplication.h"
 #include "core/utils/osSignalHandler.h"
 #include "core/utils/migrations.h"
+#include "core/utils/appUiConfig.h"
 #include "version.h"
 
-#ifndef AMNEZIA_INSTANCE_SERVER_NAME
-#define AMNEZIA_INSTANCE_SERVER_NAME "AmneziaVPNInstance"
-#endif
+// use openssl symbols to prevent linker throwing-off the OpenSSL dependency
+void anchorOpenSSL() {
+    SSL_CTX_free(SSL_CTX_new(TLS_method()));
+}
 
 #ifdef Q_OS_WIN
     #include "Windows.h"
@@ -23,9 +26,9 @@
 bool isAnotherInstanceRunning()
 {
     QLocalSocket socket;
-    socket.connectToServer(AMNEZIA_INSTANCE_SERVER_NAME);
+    socket.connectToServer(APP_INSTANCE_NAME);
     if (socket.waitForConnected(500)) {
-        qWarning() << "AmneziaVPN is already running";
+        qWarning() << APPLICATION_NAME << "is already running";
         return true;
     }
     return false;
@@ -49,6 +52,8 @@ int main(int argc, char *argv[])
 
     AmneziaApplication app(argc, argv);
     OsSignalHandler::setup();
+
+    anchorOpenSSL();
 
     ssh_init();
     QObject::connect(&app, &QCoreApplication::aboutToQuit, []() {

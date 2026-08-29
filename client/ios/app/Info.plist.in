@@ -31,7 +31,7 @@
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<false/>
 	<key>UILaunchStoryboardName</key>
-	<string>AmneziaVPNLaunchScreen</string>
+	<string>${CLIENT_IOS_LAUNCHSCREEN_NAME}</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -68,11 +68,11 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>com.wireguard.ios.app_group_id</key>
-	<string>group.org.amnezia.AmneziaVPN</string>
+	<string>${BUILD_IOS_GROUP_IDENTIFIER}</string>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Amnezia VPN needs access to the camera for reading QR-codes.</string>
+	<string>${CLIENT_APPLICATION_NAME} needs access to the camera for reading QR-codes.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
@@ -114,11 +114,11 @@
 				<string>public.data</string>
 			</array>
 			<key>UTTypeDescription</key>
-			<string>Amnezia VPN config</string>
+			<string>${CLIENT_APPLICATION_NAME} config</string>
 			<key>UTTypeIconFiles</key>
 			<array/>
 			<key>UTTypeIdentifier</key>
-			<string>org.amnezia.AmneziaVPN.amnezia-config</string>
+			<string>${BUILD_IOS_APP_IDENTIFIER}.amnezia-config</string>
 			<key>UTTypeTagSpecification</key>
 			<dict>
 				<key>public.filename-extension</key>
@@ -141,7 +141,7 @@
                         <key>UTTypeIconFiles</key>
                         <array/>
                         <key>UTTypeIdentifier</key>
-                        <string>org.amnezia.AmneziaVPN.wireguard-config</string>
+                        <string>${BUILD_IOS_APP_IDENTIFIER}.wireguard-config</string>
                         <key>UTTypeTagSpecification</key>
                         <dict>
                                 <key>public.filename-extension</key>
@@ -165,7 +165,7 @@
                         <key>UTTypeIconFiles</key>
                         <array/>
                         <key>UTTypeIdentifier</key>
-                        <string>org.amnezia.AmneziaVPN.openvpn-config</string>
+                        <string>${BUILD_IOS_APP_IDENTIFIER}.openvpn-config</string>
                         <key>UTTypeTagSpecification</key>
                         <dict>
                                 <key>public.filename-extension</key>
@@ -184,11 +184,11 @@
                                 <string>public.data</string>
                         </array>
                         <key>UTTypeDescription</key>
-                        <string>AmneziaVPN backup file</string>
+                        <string>${CLIENT_APPLICATION_NAME} backup file</string>
                         <key>UTTypeIconFiles</key>
                         <array/>
                         <key>UTTypeIdentifier</key>
-                        <string>org.amnezia.AmneziaVPN.backup-config</string>
+                        <string>${BUILD_IOS_APP_IDENTIFIER}.backup-config</string>
                         <key>UTTypeTagSpecification</key>
                         <dict>
                                 <key>public.filename-extension</key>
@@ -206,15 +206,15 @@
         <array>
                 <dict>
                         <key>CFBundleTypeName</key>
-                        <string>Amnezia VPN config</string>
+                        <string>${CLIENT_APPLICATION_NAME} config</string>
                         <key>LSHandlerRank</key>
                         <string>Alternate</string>
                         <key>LSItemContentTypes</key>
                         <array>
-                                <string>org.amnezia.AmneziaVPN.amnezia-config</string>
-                                <string>org.amnezia.AmneziaVPN.wireguard-config</string>
-                                <string>org.amnezia.AmneziaVPN.openvpn-config</string>
-                                <string>org.amnezia.AmneziaVPN.backup-config</string>
+                                <string>${BUILD_IOS_APP_IDENTIFIER}.amnezia-config</string>
+                                <string>${BUILD_IOS_APP_IDENTIFIER}.wireguard-config</string>
+                                <string>${BUILD_IOS_APP_IDENTIFIER}.openvpn-config</string>
+                                <string>${BUILD_IOS_APP_IDENTIFIER}.backup-config</string>
                         </array>
                 </dict>
         </array>
