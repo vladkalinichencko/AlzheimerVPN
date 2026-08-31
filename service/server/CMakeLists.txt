@@ -410,12 +410,11 @@ if(LINUX)
     )
 elseif(APPLE)
     file(GENERATE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/set_openvpn_rpath.cmake CONTENT
-[=[
-set(ovpn "$<TARGET_FILE_DIR:AmneziaVPN-service>/openvpn")
-set(dir "$<TARGET_FILE_DIR:OpenSSL::SSL>")
-execute_process(COMMAND install_name_tool -delete_rpath "${dir}" "${ovpn}" ERROR_QUIET)
-execute_process(COMMAND install_name_tool -add_rpath "${dir}" "${ovpn}")
-]=]
+"set(ovpn \"$<TARGET_FILE_DIR:${PROJECT}>/openvpn\")
+set(dir \"$<TARGET_FILE_DIR:OpenSSL::SSL>\")
+execute_process(COMMAND install_name_tool -delete_rpath \"\${dir}\" \"\${ovpn}\" ERROR_QUIET)
+execute_process(COMMAND install_name_tool -add_rpath \"\${dir}\" \"\${ovpn}\")
+"
     )
     add_custom_command(TARGET ${PROJECT} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/set_openvpn_rpath.cmake
