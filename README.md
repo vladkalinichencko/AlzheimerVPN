@@ -222,4 +222,6 @@ The current fork is based on upstream `5.0.1.5`. This release adds AWG 3.1,
 custom branding support, native macOS status items, and fixes for imported
 configs, VPN routes, split-tunneling subnets, IPC validation, and XRay/Telemt.
 Fork-specific hostname split tunneling, diagnostics, service isolation, and the
-ARM64-only packaging path remain layered on top.
+ARM64-only packaging path remain layered on top. When AmneziaDNS is disabled,
+the configured DNS resolvers are excluded from the VPN route so the Premium
+server cannot redirect those queries back to its AdGuard resolver.

@@ -877,12 +877,20 @@ void VpnConnection::appendSplitTunnelingConfig()
 
             if (sitesJsonArray.isEmpty() && !hasDynamicHostRules && dnsRulesJsonArray.isEmpty()) {
                 routeMode = amnezia::RouteMode::VpnAllSites;
-            } else if (routeMode == amnezia::RouteMode::VpnOnlyForwardSites) {
+            } else if (routeMode == amnezia::RouteMode::VpnOnlyForwardSites
+                       && m_appSettingsRepository->useAmneziaDns()) {
                 // Allow traffic to Amnezia DNS
                 sitesJsonArray.append(m_vpnConfiguration.value(configKey::dns1).toString());
                 sitesJsonArray.append(m_vpnConfiguration.value(configKey::dns2).toString());
             }
         }
+    }
+
+    if (!m_appSettingsRepository->useAmneziaDns()
+        && routeMode != amnezia::RouteMode::VpnOnlyForwardSites) {
+        routeMode = amnezia::RouteMode::VpnAllExceptSites;
+        sitesJsonArray.append(m_vpnConfiguration.value(configKey::dns1).toString());
+        sitesJsonArray.append(m_vpnConfiguration.value(configKey::dns2).toString());
     }
 
     m_vpnConfiguration.insert(configKey::splitTunnelType, routeMode);
