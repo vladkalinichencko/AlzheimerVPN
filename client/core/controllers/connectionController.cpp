@@ -188,7 +188,9 @@ ErrorCode ConnectionController::prepareConnection(const QString &serverId,
         if (!cfg.has_value()) return ErrorCode::InternalError;
         container = cfg->defaultContainer;
         containerConfigModel = cfg->containerConfig(container);
-        dns = cfg->getDnsPair(primaryDns, secondaryDns);
+        dns = m_appSettingsRepository->useAmneziaDns()
+                ? cfg->getDnsPair(primaryDns, secondaryDns)
+                : QPair<QString, QString>{primaryDns, secondaryDns};
         hostName = cfg->hostName;
         description = cfg->description;
         configVersion = serverConfigUtils::ConfigSource::AmneziaGateway;
