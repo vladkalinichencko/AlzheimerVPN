@@ -216,12 +216,8 @@ ls -l /Applications/AlzheimerVPN.app/Contents/MacOS/amneziawg-go \
   /Applications/AlzheimerVPN.app/Contents/MacOS/geosite.dat
 ```
 
-## Upstream 5.0.1.5
+## Upstream 5.0.3.0
 
-The current fork is based on upstream `5.0.1.5`. This release adds AWG 3.1,
-custom branding support, native macOS status items, and fixes for imported
-configs, VPN routes, split-tunneling subnets, IPC validation, and XRay/Telemt.
-Fork-specific hostname split tunneling, diagnostics, service isolation, and the
-ARM64-only packaging path remain layered on top. When AmneziaDNS is disabled,
-the configured DNS resolvers are excluded from the VPN route so the Premium
-server cannot redirect those queries back to its AdGuard resolver.
+The fork merges upstream `5.0.3.0`. [The maintenance notes](notes/fork-maintenance.md) track hostname split tunneling, diagnostics, service isolation, and ARM64 packaging. With AmneziaDNS off, configured DNS resolvers use direct routes so the Premium server cannot redirect queries to its AdGuard resolver.
+
+With kill switch enabled on macOS, the connection owns protection from tunnel startup until an explicit disconnect. Protocol cleanup keeps the firewall rules active during automatic recovery and after a failed attempt. Configured split-tunnel exceptions still permit direct traffic. Strict kill switch also blocks traffic after an explicit disconnect.

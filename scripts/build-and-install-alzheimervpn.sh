@@ -273,6 +273,11 @@ cp "$BUILD_DIR/service/server/amneziawg-go"        "$STAGE_APP/Contents/MacOS/wi
 
 QT_BIN_DIR="$(qtpaths --query QT_INSTALL_BINS)"
 QT_LIB_DIR="$(qtpaths --query QT_INSTALL_LIBS)"
+if ! otool -l "$STAGE_APP/Contents/MacOS/AmneziaVPN" | awk '/cmd LC_RPATH/{getline; getline; print $2}' | grep -Fx "$QT_LIB_DIR" >/dev/null; then
+  install_name_tool -add_rpath "$QT_LIB_DIR" "$STAGE_APP/Contents/MacOS/AmneziaVPN"
+fi
+QT_CORE_REFERENCE="$(otool -L "$STAGE_APP/Contents/MacOS/AmneziaVPN" | awk '/\/QtCore.framework\//{print $1; exit}')"
+install_name_tool -change "$QT_CORE_REFERENCE" '@rpath/QtCore.framework/Versions/A/QtCore' "$STAGE_APP/Contents/MacOS/AmneziaVPN"
 "$QT_BIN_DIR/macdeployqt" "$STAGE_APP" \
   -executable="$STAGE_APP/Contents/MacOS/$FORK_SERVICE_NAME" \
   -qmldir="$REPO_DIR/client/ui/qml" -libpath="$QT_LIB_DIR" -no-codesign -always-overwrite
@@ -297,6 +302,7 @@ for executable in AmneziaVPN "$FORK_SERVICE_NAME"; do
 done
 nm -gU "$STAGE_APP/Contents/Frameworks/libcrypto.3.dylib" | grep ' _deflate$' >/dev/null \
   || { echo "Staged libcrypto does not satisfy the app's zlib symbols." >&2; exit 1; }
+python3 "$SCRIPT_DIR/check-macos-bundle-dependencies.py" "$STAGE_APP"
 
 # PF (packet filter) rules — MacOSFirewall expects them at
 # $BUNDLE/Contents/MacOS/pf/amn.conf + amn.NNN.*.conf. Upstream Amnezia ships

@@ -669,15 +669,36 @@ void VpnConnection::connectToVpn(const QString &serverId, DockerContainer contai
     m_vpnConfiguration = vpnConfiguration;
 
 #ifdef AMNEZIA_DESKTOP
+    appendKillSwitchConfig();
+#endif
+
+    appendSplitTunnelingConfig();
+
+#if defined(Q_OS_MACOS) && !defined(MACOS_NE)
+    QJsonObject firewallConfig = m_vpnConfiguration;
+    firewallConfig.insert("vpnServer", m_remoteAddress);
+    const bool protectedConnection = IpcClient::withInterface(
+        [this, firewallConfig](QSharedPointer<IpcInterfaceReplica> iface) {
+            auto reply = iface->setConnectionProtection(
+                m_appSettingsRepository->isKillSwitchEnabled(), firewallConfig);
+            return reply.waitForFinished() && reply.returnValue();
+        });
+    if (!protectedConnection) {
+        markLastError(ErrorCode::AmneziaServiceConnectionFailed);
+        setConnectionHealth(ConnectionHealth::LocalServiceUnavailable);
+        setConnectionState(Vpn::ConnectionState::Error);
+        emit vpnProtocolError(ErrorCode::AmneziaServiceConnectionFailed);
+        return;
+    }
+#endif
+
+#ifdef AMNEZIA_DESKTOP
     if (m_vpnProtocol) {
         disconnect(m_vpnProtocol.data(), &VpnProtocol::protocolError, this, &VpnConnection::onProtocolError);
         m_vpnProtocol->stop();
         m_vpnProtocol.reset();
     }
-    appendKillSwitchConfig();
 #endif
-
-    appendSplitTunnelingConfig();
 
     if (deferUntilPhysicalNetworkReady(PendingNetworkAction::StartConnection,
                                        ConnectionHealth::CheckingLocalNetwork)) {
@@ -1141,6 +1162,14 @@ void VpnConnection::startSilentReconnect()
 
 void VpnConnection::disconnectFromVpn()
 {
+#if defined(Q_OS_MACOS) && !defined(MACOS_NE)
+    IpcClient::withInterface([](QSharedPointer<IpcInterfaceReplica> iface) {
+        auto reply = iface->setConnectionProtection(false, QJsonObject());
+        if (!reply.waitForFinished() || !reply.returnValue()) {
+            qWarning() << "Failed to release connection kill switch";
+        }
+    });
+#endif
 #if defined(Q_OS_IOS) || defined(MACOS_NE)
     // iOS/macOS NE use IosController directly; m_vpnProtocol is not set there.
     IosController::Instance()->disconnectVpn();

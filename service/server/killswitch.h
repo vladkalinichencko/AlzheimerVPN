@@ -14,6 +14,7 @@ public:
     bool init();
     bool refresh(bool enabled);
     bool disableKillSwitch();
+    bool setConnectionProtection(bool enabled, const QJsonObject &config);
     bool disableAllTraffic();
     bool enablePeerTraffic(const QJsonObject &configStr);
     bool enableKillSwitch(const QJsonObject &configStr, int vpnAdapterIndex);
@@ -25,6 +26,7 @@ public:
 private:
     KillSwitch(QObject* parent) {};
     QStringList m_allowedRanges;
+    bool m_connectionProtection = false;
     QSharedPointer<SecureQSettings> m_appSettigns;
 
 };

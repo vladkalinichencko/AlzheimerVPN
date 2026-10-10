@@ -98,7 +98,31 @@ bool KillSwitch::isStrictKillSwitchEnabled()
     return m_appSettigns->value("Conf/strictKillSwitchEnabled", false).toBool();
 }
 
+bool KillSwitch::setConnectionProtection(bool enabled, const QJsonObject &config)
+{
+    if (!enabled) {
+        m_connectionProtection = false;
+        return disableKillSwitch();
+    }
+
+    if (!enableKillSwitch(config, 0)) {
+        return false;
+    }
+    m_connectionProtection = true;
+#ifdef Q_OS_MACOS
+    return MacOSFirewall::isInstalled()
+            && MacOSFirewall::isAnchorEnabled(QStringLiteral("250.blockIPv6"))
+            && MacOSFirewall::isAnchorEnabled(config.value("splitTunnelType").toInt() == 1
+                    ? QStringLiteral("120.blockNets") : QStringLiteral("100.blockAll"));
+#else
+    return true;
+#endif
+}
+
 bool KillSwitch::disableKillSwitch() {
+    if (m_connectionProtection) {
+        return true;
+    }
 #ifdef Q_OS_LINUX
     if (isStrictKillSwitchEnabled()) {
         LinuxFirewall::setAnchorEnabled(LinuxFirewall::Both, QStringLiteral("000.allowLoopback"), true);
@@ -376,6 +400,7 @@ bool KillSwitch::enableKillSwitch(const QJsonObject &configStr, int vpnAdapterIn
         qCritical() << "IPC: invalid IP/CIDR in allownets/blocknets, rejecting enableKillSwitch";
         return false;
     }
+    m_allowedRanges = allownets;
 #endif
 
 #ifdef Q_OS_LINUX

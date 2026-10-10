@@ -306,6 +306,11 @@ bool IpcServer::disableKillSwitch()
     return KillSwitch::instance()->disableKillSwitch();
 }
 
+bool IpcServer::setConnectionProtection(bool enabled, const QJsonObject &config)
+{
+    return KillSwitch::instance()->setConnectionProtection(enabled, config);
+}
+
 bool IpcServer::enablePeerTraffic(const QJsonObject &configStr)
 {
 #ifdef MZ_DEBUG
