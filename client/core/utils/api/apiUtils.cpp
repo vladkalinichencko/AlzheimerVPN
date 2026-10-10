@@ -13,6 +13,10 @@
 
 #include "version.h"
 
+#if defined(Q_OS_ANDROID)
+    #include "platforms/android/android_controller.h"
+#endif
+
 using namespace amnezia;
 
 namespace
@@ -89,7 +93,7 @@ QString apiUtils::getAppLanguageCode(const SecureAppSettingsRepository *appSetti
 QString apiUtils::getDistributionChannel()
 {
 #if defined(Q_OS_ANDROID)
-    return {};
+    return AndroidController::instance()->isPlay() ? QStringLiteral("googleplay") : QString();
 #elif defined(Q_OS_IOS) || defined(MACOS_NE)
     return QStringLiteral("appstore");
 #else
@@ -97,8 +101,14 @@ QString apiUtils::getDistributionChannel()
 #endif
 }
 
-QString apiUtils::getCountryFlagCode(const QString &serverCountryCode)
+QString apiUtils::getCountryFlagCode(const QString &serverCountryCodeL10n, const QString &serverCountryCode)
 {
+    if (!serverCountryCodeL10n.isEmpty()) {
+        return serverCountryCodeL10n.toUpper();
+    }
+    if (serverCountryCode.isEmpty()) {
+        return {};
+    }
     return serverCountryCode.section('-', 0, 0).toUpper();
 }
 
