@@ -28,6 +28,8 @@ There is also an Xray-specific safety net. In `VpnAllExceptSites` mode, Xray rec
 
 The practical result: services with rotating DNS answers, CDN pools, and browser-side connection reuse are handled as changing network targets instead of one fixed IP captured at setup time.
 
+Site rows show a green check beside the delete button when IP addresses are saved or a fixed IP/subnet is specified. A failed address lookup shows a red cross, even if older addresses remain saved. An unchecked hostname without saved addresses also shows a red cross. Adding a hostname or importing one without saved IPs starts a lookup. Pending lookups without saved addresses and dynamic domain masks have no status icon. The icons report address availability and lookup failures; they do not verify route installation or service reachability.
+
 ### 🧯 Routes And Kill Switch Stay Together
 
 On macOS, split tunneling depends on both route-table state and firewall state. Kill-switch rules must agree with the route table.

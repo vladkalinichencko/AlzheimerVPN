@@ -158,6 +158,7 @@ PageType {
                 }
             }
         }
+
     }
 
     ListViewType {
@@ -197,16 +198,16 @@ PageType {
         delegate: ColumnLayout {
             width: listView.width
 
-            LabelWithButtonType {
+            SplitTunnelSiteRow {
                 id: site
                 Layout.fillWidth: true
 
-                text: url
-                descriptionText: ip
-                rightImageSource: "qrc:/images/controls/trash.svg"
-                rightImageColor: AmneziaStyle.color.paleGray
+                hostname: url
+                addresses: ip
+                succeeded: checkSucceeded
+                failed: checkFailed
 
-                clickedFunction: function() {
+                onRemoveRequested: {
                     var headerText = qsTr("Remove ") + url + "?"
                     var yesButtonText = qsTr("Continue")
                     var noButtonText = qsTr("Cancel")

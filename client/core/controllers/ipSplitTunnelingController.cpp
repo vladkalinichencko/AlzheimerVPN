@@ -16,6 +16,52 @@ IpSplitTunnelingController::IpSplitTunnelingController(SecureAppSettingsReposito
     fillSites();
 }
 
+IpSplitTunnelingController::~IpSplitTunnelingController()
+{
+    clearChecks();
+}
+
+void IpSplitTunnelingController::clearChecks()
+{
+    for (const SiteCheck &check : m_siteChecks) {
+        if (check.lookupId >= 0) {
+            QHostInfo::abortHostLookup(check.lookupId);
+        }
+    }
+    m_siteChecks.clear();
+}
+
+IpSplitTunnelingController::SiteCheck IpSplitTunnelingController::siteCheck(const QString &hostname) const
+{
+    const SplitTunnelRule rule = SplitTunnelRule::fromText(hostname);
+    if (rule.type() == SplitTunnelRule::Type::IpSubnet) {
+        return {CheckState::Address, {}, -1};
+    }
+    if (rule.isDynamicHostRule()) {
+        return {CheckState::Dynamic, {}, -1};
+    }
+    return m_siteChecks.value(rule.normalizedText());
+}
+
+void IpSplitTunnelingController::checkSite(const QString &hostname)
+{
+    const SplitTunnelRule rule = SplitTunnelRule::fromText(hostname);
+    const QString host = rule.normalizedText();
+    if (rule.type() != SplitTunnelRule::Type::ExactHost ||
+        !m_appSettingsRepository->vpnSites(m_currentRouteMode).contains(host)) {
+        return;
+    }
+    SiteCheck &check = m_siteChecks[host];
+    if (check.state == CheckState::Resolving) {
+        return;
+    }
+    check = {CheckState::Resolving, {}, -1};
+    check.lookupId = QHostInfo::lookupHost(host, this, [this, host](const QHostInfo &info) {
+        onHostResolved(host, info);
+    });
+    emit siteCheckChanged(host);
+}
+
 bool IpSplitTunnelingController::addSiteInternal(const QString &hostname, const QStringList &ips)
 {
     QVariantMap existing = m_appSettingsRepository->vpnSites(m_currentRouteMode);
@@ -66,6 +112,7 @@ void IpSplitTunnelingController::addSites(const QMap<QString, QStringList> &site
     }
 
     if (replaceExisting) {
+        clearChecks();
         m_sites.clear();
     }
     for (auto it = normalizedSites.constBegin(); it != normalizedSites.constEnd(); ++it) {
@@ -91,6 +138,11 @@ void IpSplitTunnelingController::addSites(const QMap<QString, QStringList> &site
         m_appSettingsRepository->removeAllVpnSites(m_currentRouteMode);
     }
     m_appSettingsRepository->addVpnSites(m_currentRouteMode, normalizedSites);
+    for (auto it = normalizedSites.constBegin(); it != normalizedSites.constEnd(); ++it) {
+        if (it.value().isEmpty()) {
+            checkSite(it.key());
+        }
+    }
 }
 
 bool IpSplitTunnelingController::addSite(const QString &hostname)
@@ -108,7 +160,7 @@ bool IpSplitTunnelingController::addSite(const QString &hostname)
     }
     
     if (addSiteInternal(normalizedHostname, {})) {
-        QHostInfo::lookupHost(normalizedHostname, this, SLOT(onHostResolved(QHostInfo)));
+        checkSite(normalizedHostname);
         return true;
     }
     
@@ -119,6 +171,10 @@ bool IpSplitTunnelingController::removeSite(const QString &hostname)
 {
     for (int i = 0; i < m_sites.size(); i++) {
         if (m_sites[i].first == hostname) {
+            const SiteCheck check = m_siteChecks.take(hostname);
+            if (check.lookupId >= 0) {
+                QHostInfo::abortHostLookup(check.lookupId);
+            }
             m_sites.removeAt(i);
             m_appSettingsRepository->removeVpnSite(m_currentRouteMode, hostname);
             return true;
@@ -129,12 +185,14 @@ bool IpSplitTunnelingController::removeSite(const QString &hostname)
 
 void IpSplitTunnelingController::removeSites()
 {
+    clearChecks();
     m_sites.clear();
     m_appSettingsRepository->removeAllVpnSites(m_currentRouteMode);
 }
 
 void IpSplitTunnelingController::setRouteMode(RouteMode routeMode)
 {
+    clearChecks();
     m_currentRouteMode = routeMode;
     fillSites();
     m_appSettingsRepository->setRouteMode(routeMode);
@@ -217,10 +275,14 @@ bool IpSplitTunnelingController::validateHostname(const QString &hostname) const
 }
 
 
-void IpSplitTunnelingController::onHostResolved(const QHostInfo &hostInfo)
+void IpSplitTunnelingController::onHostResolved(const QString &hostname, const QHostInfo &hostInfo)
 {
+    auto it = m_siteChecks.find(hostname);
+    if (it == m_siteChecks.end() || it->state != CheckState::Resolving ||
+        it->lookupId != hostInfo.lookupId()) {
+        return;
+    }
     const QList<QHostAddress> &addresses = hostInfo.addresses();
-    QString hostname = hostInfo.hostName();
 
     QStringList allIpv4;
     for (const QHostAddress &addr : addresses) {
@@ -232,9 +294,15 @@ void IpSplitTunnelingController::onHostResolved(const QHostInfo &hostInfo)
     qDebug() << "[SplitTunneling] Host resolved:" << hostname
              << "-> adding all IPv4 addresses to list:" << allIpv4;
 
-    if (!allIpv4.isEmpty()) {
+    if (hostInfo.error() == QHostInfo::NoError && !allIpv4.isEmpty()) {
+        *it = {CheckState::Resolved, {}, -1};
         processSiteAfterResolve(hostname, allIpv4);
+    } else {
+        const QString error = hostInfo.error() == QHostInfo::NoError
+            ? tr("No IPv4 addresses returned") : hostInfo.errorString();
+        *it = {CheckState::Failed, error, -1};
     }
+    emit siteCheckChanged(hostname);
 }
 
 void IpSplitTunnelingController::processSiteAfterResolve(const QString &hostname, const QStringList &ips)

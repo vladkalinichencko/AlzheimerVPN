@@ -13,6 +13,7 @@ IpSplitTunnelingUiController::IpSplitTunnelingUiController(IpSplitTunnelingContr
       m_ipSplitTunnelingController(ipSplitTunnelingController),
       m_ipSplitTunnelingModel(ipSplitTunnelingModel)
 {
+    m_ipSplitTunnelingModel->setController(m_ipSplitTunnelingController);
     m_ipSplitTunnelingModel->updateModel(m_ipSplitTunnelingController->getCurrentSites());
 }
 

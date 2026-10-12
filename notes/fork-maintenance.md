@@ -74,4 +74,24 @@ Bootout precedes socket cleanup and bootstrap so launchd cannot spawn the new he
 
 ## Current state
 
+2026-10-12: preserve the existing site rows and show only a green check or red cross beside the trash icon. Saved IPs and fixed IP/subnet rules show green immediately. A failed lookup or an unchecked exact hostname without saved addresses shows red. Pending lookups without saved IPs and dynamic masks have no icon. Use the existing check.svg, close.svg and LabelWithButtonType icon slot. No extra captions or Check/Retry buttons. `IpSplitTunnelingController` owns session-only checks; `IpSplitTunnelingModel` reads them and emits row updates. Exact hosts are checked on addition and on imports without saved IPs. Imports with IPs remain unchecked. Wildcards and IP rules do not start lookups. A failed refresh keeps cached IPs. Removal, replacement imports, mode changes, and destruction cancel pending lookups; results must match the current lookup ID before they can save addresses. These states do not report route installation or service reachability. Runtime daemon addresses remain separate from the exported settings cache.
+
+The focused tests compile the production controller, repository, and model with in-memory settings. Run them without touching the active VPN:
+
+```bash
+cmake -S tests/split-tunneling -B /private/tmp/alzheimervpn-split-tests -DCMAKE_PREFIX_PATH=/opt/homebrew
+cmake --build /private/tmp/alzheimervpn-split-tests -j4
+ctest --test-dir /private/tmp/alzheimervpn-split-tests --output-on-failure
+SPLIT_TEST_LIVE_DNS=1 /private/tmp/alzheimervpn-split-tests/split_tunneling
+```
+
+The optional live check exercises successful and failed system lookups. All five test cases passed with it enabled. The preview uses the production `SplitTunnelSiteRow.qml` with sample states and the app's Basic control style; it creates an offscreen window without VPN objects:
+
+```bash
+/opt/homebrew/opt/qt/bin/lrelease client/translations/amneziavpn_ru_RU.ts -qm /private/tmp/alzheimervpn-site-status-ru.qm
+QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software /private/tmp/alzheimervpn-split-tests/split_preview "$PWD" /private/tmp/alzheimervpn-site-status-preview.png /private/tmp/alzheimervpn-site-status-ru.qm
+```
+
+The verified staging bundle is `/private/tmp/AlzheimerVPN.app`. All 203 Mach-O files have bundled or system dependencies, the client is arm64, and deep strict signature verification passed. The staging log is `/private/tmp/alzheimervpn-site-status-build.log`. Final UI cleanup was compiled in `/private/tmp/alzheimervpn-site-status-final-compile.log`; the freshly linked client was copied into the staged bundle with its existing dependency paths, then dependencies and signature were checked again. Conan required escalation to update `~/.conan2`. Use `./scripts/build-and-install-alzheimervpn.sh --no-install`; do not replace or restart the active client automatically.
+
 2026-10-10: upstream 5.0.3.0 merged in `70b84590`. The connection-protection regression tests passed; removing the protection guard in a temporary copy made the recovery test fail. The staging build completed at `/private/tmp/AlzheimerVPN.app`; all six executables are arm64, deep signature verification passed, and all 203 Mach-O files have bundled or system dependencies. The build log is `/private/tmp/alzheimervpn-build-20261010-final.log`. The version smoke check reached the existing-instance guard, so it does not verify the new GUI. Active app and service have not been replaced or restarted. Real packet capture across sleep/wake remains a post-install check requiring permission to interrupt the connection.

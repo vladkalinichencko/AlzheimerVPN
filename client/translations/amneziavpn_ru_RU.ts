@@ -369,6 +369,10 @@ Already installed containers were found on the server. All installed containers 
 <context>
     <name>IpSplitTunnelingController</name>
     <message>
+        <source>No IPv4 addresses returned</source>
+        <translation>У домена нет IPv4-адресов</translation>
+    </message>
+    <message>
         <location filename="../core/controllers/ipSplitTunnelingController.cpp" line="224"/>
         <source>Failed to parse JSON data: %1</source>
         <translation>Не удалось разобрать данные в формате JSON: %1</translation>
