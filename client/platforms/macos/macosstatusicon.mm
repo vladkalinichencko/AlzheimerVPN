@@ -41,7 +41,7 @@ void MacOSStatusIcon::setIcon(const QString& iconPath, bool useNativeMask, qreal
   NSImage* image = [[NSImage alloc] initWithData:resource.uncompressedData().toNSData()];
   CGFloat side = [[NSStatusBar systemStatusBar] thickness] - 4.0;
   image.size = NSMakeSize(side, side);
-  [image setTemplate:useNativeMask];
+  [image setTemplate:useNativeMask || tint.isValid()];
 
   NSStatusBarButton* button = static_cast<NSStatusItem*>(m_statusItem).button;
   button.image = image;
