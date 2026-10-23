@@ -6,7 +6,9 @@
 #include "leakdetector.h"
 
 #include <QDebug>
+#include <QImage>
 #include <QMenu>
+#include <QPainter>
 
 #import <Cocoa/Cocoa.h>
 #import <UserNotifications/UserNotifications.h>
@@ -38,17 +40,28 @@ void MacOSStatusIcon::setIcon(const QString& iconPath, bool useNativeMask, qreal
     return;
   }
 
-  NSImage* image = [[NSImage alloc] initWithData:resource.uncompressedData().toNSData()];
+  NSImage* image;
+  if (tint.isValid()) {
+    QImage pixels = QImage::fromData(resource.uncompressedData())
+        .convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    QPainter painter(&pixels);
+    painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
+    painter.fillRect(pixels.rect(), tint);
+    painter.end();
+    CGImageRef cgImage = pixels.toCGImage();
+    image = [[NSImage alloc] initWithCGImage:cgImage size:NSZeroSize];
+    CGImageRelease(cgImage);
+  } else {
+    image = [[NSImage alloc] initWithData:resource.uncompressedData().toNSData()];
+  }
+
   CGFloat side = [[NSStatusBar systemStatusBar] thickness] - 4.0;
   image.size = NSMakeSize(side, side);
-  [image setTemplate:useNativeMask || tint.isValid()];
+  [image setTemplate:useNativeMask && !tint.isValid()];
 
   NSStatusBarButton* button = static_cast<NSStatusItem*>(m_statusItem).button;
   button.image = image;
   button.alphaValue = opacity;
-  button.contentTintColor = tint.isValid()
-      ? [NSColor colorWithSRGBRed:tint.redF() green:tint.greenF() blue:tint.blueF() alpha:tint.alphaF()]
-      : nil;
   [image release];
 }
 
