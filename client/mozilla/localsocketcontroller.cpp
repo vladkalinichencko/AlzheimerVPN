@@ -492,8 +492,7 @@ void LocalSocketController::parseCommand(const QByteArray& command) {
       return;
     }
 
-    logger.debug() << "Handshake completed with:"
-                   << pubkey.toString();
+    logger.info() << "Handshake completed";
 
     checkStatus();
 

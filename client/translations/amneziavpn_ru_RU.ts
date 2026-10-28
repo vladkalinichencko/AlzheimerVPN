@@ -4518,6 +4518,14 @@ Create one from the current settings.</source>
         <translation>Включение этой функции позволяет сохранять логи на вашем устройстве. По умолчанию она отключена. Включите сохранение логов в случае сбоев в работе приложения.</translation>
     </message>
     <message>
+        <source>Connection diagnostics are always saved for the last 24 hours, including across app restarts and sleep. Enable detailed logs for additional debugging information.</source>
+        <translation>Диагностика подключений сохраняется за последние сутки, в том числе после перезапуска приложения и сна ноутбука. Подробные логи добавляют отладочную информацию.</translation>
+    </message>
+    <message>
+        <source>Detailed logs</source>
+        <translation>Подробные логи</translation>
+    </message>
+    <message>
         <location filename="../ui/qml/Pages2/PageSettingsLogging.qml" line="63"/>
         <source>Enable logs</source>
         <translation>Включить запись логов</translation>

@@ -15,6 +15,7 @@ import "../Controls2/TextTypes"
 
 PageType {
     id: root
+    readonly property bool persistentLogging: Qt.platform.os === "osx" && !IsMacOsNeBuild
 
     BackButtonType {
         id: backButton
@@ -48,7 +49,9 @@ PageType {
                 Layout.rightMargin: 16
 
                 headerText: qsTr("Logging")
-                descriptionText: qsTr("Enabling this function will save application's logs automatically. " +
+                descriptionText: root.persistentLogging
+                                 ? qsTr("Connection diagnostics are always saved for the last 24 hours, including across app restarts and sleep. Enable detailed logs for additional debugging information.")
+                                 : qsTr("Enabling this function will save application's logs automatically. " +
                                       "By default, logging functionality is disabled. Enable log saving in case of application malfunction.")
             }
 
@@ -60,7 +63,7 @@ PageType {
                 Layout.leftMargin: 16
                 Layout.rightMargin: 16
 
-                text: qsTr("Enable logs")
+                text: root.persistentLogging ? qsTr("Detailed logs") : qsTr("Enable logs")
 
                 checked: SettingsController.isLoggingEnabled
                 

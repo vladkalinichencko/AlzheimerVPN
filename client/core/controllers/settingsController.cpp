@@ -79,6 +79,11 @@ void SettingsController::toggleLogging(bool enable)
 {
     m_appSettingsRepository->setSaveLogs(enable);
 #ifndef Q_OS_ANDROID
+#if defined(Q_OS_MACOS) && !defined(MACOS_NE)
+    if (!Logger::init(false, enable)) {
+        qWarning() << "Initialization of connection logging failed";
+    }
+#else
     if (!enable) {
         Logger::deInit();
     } else {
@@ -86,6 +91,7 @@ void SettingsController::toggleLogging(bool enable)
             qWarning() << "Initialization of debug subsystem failed";
         }
     }
+#endif
 #endif
     Logger::setServiceLogsEnabled(enable);
 
@@ -342,6 +348,7 @@ void SettingsController::disableHomeAdLabel()
 
 void SettingsController::checkIfNeedDisableLogs()
 {
+#if !defined(Q_OS_MACOS) || defined(MACOS_NE)
     if (m_appSettingsRepository->isSaveLogs()) {
         m_loggingDisableDate = m_appSettingsRepository->getLogEnableDate().addDays(14);
         if (m_loggingDisableDate <= QDateTime::currentDateTime()) {
@@ -349,6 +356,7 @@ void SettingsController::checkIfNeedDisableLogs()
             clearLogs();
         }
     }
+#endif
 }
 
 QString SettingsController::getPlatform() const

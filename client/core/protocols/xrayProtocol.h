@@ -35,10 +35,8 @@ private:
     int m_socksPort = 10808;
 
     QSharedPointer<IpcProcessInterfaceReplica> m_tun2socksProcess;
-    // Guards re-entrancy: tun2socks::finished can be re-emitted from a queued
-    // metacall while stop() is already running, otherwise stop() recurses.
-    bool m_stopping = false;
-    bool m_stopRequested = false;
+    bool m_stopRequested = true;
+    bool m_routingSetupStarted = false;
     int m_tun2socksRetryCount = 0;
     static constexpr int maxTun2SocksRetries = 5;
     static constexpr int tun2socksRetryDelayMs = 400;

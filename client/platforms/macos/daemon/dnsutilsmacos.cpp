@@ -187,13 +187,13 @@ bool DnsUtilsMacos::updateResolvers(const QString& ifname,
 
   const QList<QHostAddress> matchedResolvers = backedUpResolvers();
   if (m_splitRouteObserver.start(resolvers, matchedResolvers)) {
-    logger.debug() << "DNS split route observer enabled with upstream resolvers"
+    logger.info() << "DNS split route observer enabled with upstream resolvers"
                    << resolverList
                    << "matched upstream resolvers" << addressStrings(matchedResolvers);
     resolverList = QStringList{QStringLiteral("127.0.0.1")};
   } else {
     m_splitRouteObserver.stop();
-    logger.debug() << "DNS split route observer disabled; using resolvers"
+    logger.info() << "DNS split route observer disabled; using resolvers"
                    << resolverList;
   }
 
@@ -245,7 +245,7 @@ bool DnsUtilsMacos::restoreResolvers() {
         kCFAllocatorSystemDefault, nullptr,
         CFSTR("Setup:/Network/Service/%s/DNS"), qPrintable(uuid));
 
-    logger.debug() << "Restoring DNS config for" << uuid;
+    logger.info() << "Restoring DNS config for" << uuid;
     const DnsBackup& backup = m_prevServices[uuid];
     if (backup.isValid()) {
       CFMutableDictionaryRef config;

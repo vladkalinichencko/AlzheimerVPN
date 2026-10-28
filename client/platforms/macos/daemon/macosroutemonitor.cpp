@@ -187,7 +187,7 @@ void MacosRouteMonitor::handleRtmDelete(const struct rt_msghdr* rtm,
     protocol = QAbstractSocket::IPv6Protocol;
   }
 
-  logger.debug() << "Lost default route via" << ifname
+  logger.info() << "Lost default route via" << ifname
                  << logger.sensitive(addrToString(addrlist[1]));
   for (const IPAddress& prefix : m_exclusionRoutes) {
     if (prefix.address().protocol() == protocol) {
@@ -309,7 +309,7 @@ void MacosRouteMonitor::handleRtmUpdate(const struct rt_msghdr* rtm,
   }
 
   // Update the exclusion routes with the new default route.
-  logger.debug() << "Updating default route via" << ifname
+  logger.info() << "Updating default route via" << ifname
                  << addrToString(addrlist[1]);
   for (const IPAddress& prefix : m_exclusionRoutes) {
     if (prefix.address().protocol() == protocol) {
@@ -665,7 +665,7 @@ bool MacosRouteMonitor::rtmFetchDefaultRoutes(int family) {
       continue;
     }
 
-    logger.debug() << "Fetched physical default route via" << ifname
+    logger.info() << "Fetched physical default route via" << ifname
                    << addrToString(*gateway);
     for (const IPAddress& prefix : m_exclusionRoutes) {
       if (prefix.address().protocol() == protocol) {

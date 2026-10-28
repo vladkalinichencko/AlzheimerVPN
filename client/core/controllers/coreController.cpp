@@ -273,11 +273,17 @@ void CoreController::initLogging()
 {
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     bool enabled = m_appSettingsRepository->isSaveLogs();
+#if defined(Q_OS_MACOS) && !defined(MACOS_NE)
+    if (!Logger::init(false, enabled)) {
+        qWarning() << "Initialization of connection logging failed";
+    }
+#else
     if (enabled) {
         if (!Logger::init(false)) {
             qWarning() << "Initialization of debug subsystem failed";
         }
     }
+#endif
     Logger::setServiceLogsEnabled(enabled);
 #endif
 }

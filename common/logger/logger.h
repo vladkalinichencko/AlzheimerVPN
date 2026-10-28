@@ -6,6 +6,8 @@
 #include <QFile>
 #include <QString>
 #include <QTextStream>
+#include <QDateTime>
+#include <QRecursiveMutex>
 
 #include "mozilla/shared/loglevel.h"
 
@@ -16,7 +18,7 @@ class Logger : public QObject
 public:
     static Logger &Instance();
 
-    static bool init(bool isServiceLogger);
+    static bool init(bool isServiceLogger, bool debugEnabled = true);
     static void deInit();
 
     static bool setServiceLogsEnabled(bool enabled);
@@ -102,8 +104,14 @@ private:
 
     static QString userLogsDir();
 
+    static bool rotateLogFile(const QDateTime &now);
+    static QString readLogFiles(const QString &basePath);
+    static QRecursiveMutex m_mutex;
+    static QString m_basePath;
+    static bool m_debugEnabled;
+    friend class LoggerTest;
+
     static QFile m_file;
-    static QTextStream m_textStream;
     static QString m_logFileName;
     static QString m_serviceLogFileName;
 

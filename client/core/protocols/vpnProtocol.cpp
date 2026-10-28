@@ -23,6 +23,11 @@ VpnProtocol::VpnProtocol(const QJsonObject &configuration, QObject *parent)
       m_receivedBytes(0),
       m_sentBytes(0)
 {
+    qInfo() << "VPN protocol created"
+            << "protocol=" << configuration.value(configKey::vpnProto).toString()
+            << "server=" << configuration.value(configKey::hostName).toString()
+            << "dns1=" << configuration.value(configKey::dns1).toString()
+            << "dns2=" << configuration.value(configKey::dns2).toString();
     m_timeoutTimer->setSingleShot(true);
     connect(m_timeoutTimer, &QTimer::timeout, this, &VpnProtocol::onTimeout);
 }
@@ -92,7 +97,7 @@ void VpnProtocol::setConnectionState(Vpn::ConnectionState state)
         m_sentBytes = 0;
     }
 
-    qDebug().noquote() << QString("Connection state: '%1'").arg(textConnectionState());
+    qInfo().noquote() << QString("Connection state: '%1'").arg(textConnectionState());
 
     emit connectionStateChanged(m_connectionState);
 }

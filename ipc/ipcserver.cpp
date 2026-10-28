@@ -229,11 +229,15 @@ void IpcServer::setLogsEnabled(bool enabled)
     qDebug() << "IpcServer::setLogsEnabled";
 #endif
 
+#if defined(Q_OS_MACOS) && !defined(MACOS_NE)
+    Logger::init(true, enabled);
+#else
     if (enabled) {
         Logger::init(true);
     } else {
         Logger::deInit();
     }
+#endif
 }
 
 bool IpcServer::startNetworkCheck(const QString& serverIpv4Gateway, const QString& deviceIpv4Address)

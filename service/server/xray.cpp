@@ -44,7 +44,7 @@ bool Xray::startXray(const QString &cfg)
     m_defaultIfaceIdx = defaultIface.index();
 #endif
     if (defaultIface.index() > 0) {
-        qDebug() << "[xray] using uplink interface:" << defaultIface.name() << "(" << defaultIface.index() << ")";
+        qInfo() << "[xray] using uplink interface:" << defaultIface.name() << "(" << defaultIface.index() << ")";
     }
 
 #ifdef Q_OS_MAC
@@ -59,7 +59,7 @@ bool Xray::startXray(const QString &cfg)
 #endif
 
     if (auto err = amnezia_xray_setsockcallback(ctxSockCallback, this); err != nullptr) {
-        qDebug() << "[xray] sockopt failed: " << err;
+        qWarning() << "[xray] sockopt failed: " << err;
         amnezia_xray_free(err);
         return false;
     }
@@ -68,13 +68,13 @@ bool Xray::startXray(const QString &cfg)
 
     QByteArray bytes = cfg.toUtf8();
     if (auto err = amnezia_xray_configure(bytes.data()); err != nullptr) {
-        qDebug() << "[xray] configuration failed: " << err;
+        qWarning() << "[xray] configuration failed: " << err;
         amnezia_xray_free(err);
         return false;
     }
 
     if (auto err = amnezia_xray_start(); err != nullptr) {
-        qDebug() << "[xray] failed to start: " << err;
+        qWarning() << "[xray] failed to start: " << err;
         amnezia_xray_free(err);
         return false;
     }
@@ -87,7 +87,7 @@ bool Xray::stopXray()
     qDebug() << "Xray::stopXray()";
     bool success = true;
     if (auto err = amnezia_xray_stop(); err != nullptr) {
-        qDebug() << "[xray] failed to stop: " << err;
+        qWarning() << "[xray] failed to stop: " << err;
         amnezia_xray_free(err);
         success = false;
     }
@@ -106,7 +106,7 @@ bool Xray::stopXray()
 void Xray::logHandler(char* str)
 {
     QMetaObject::invokeMethod(qApp, [str = QString::fromUtf8(str)] {
-        qDebug() << "[xray]" << str;
+        qInfo() << "[xray]" << str;
     }, Qt::QueuedConnection);
 }
 

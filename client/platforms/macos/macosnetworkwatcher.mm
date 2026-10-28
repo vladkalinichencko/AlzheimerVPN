@@ -151,7 +151,7 @@ void PowerNotificationsListener::sleepWakeupCallBack(void *refParam, io_service_
          * however the system WILL still go to sleep.
          */
 
-        logger.debug() << "System power message: system WILL sleep";
+        logger.info() << "System power message: system WILL sleep";
         if (listener->m_watcher) {
             listener->m_watcher->prepareForSleep();
         }
@@ -174,7 +174,7 @@ void PowerNotificationsListener::sleepWakeupCallBack(void *refParam, io_service_
         break;
 
     case kIOMessageSystemHasPoweredOn:
-        logger.debug() << "System has powered on - waiting for physical default route";
+        logger.info() << "System has powered on - waiting for physical default route";
         if (listener->m_watcher) {
             QMetaObject::invokeMethod(listener->m_watcher, [watcher = listener->m_watcher]() {
                 watcher->requestWakeup();
@@ -219,7 +219,7 @@ void MacOSNetworkWatcher::physicalDefaultRouteChanged(bool ready) {
   emit physicalNetworkReadyChanged(ready);
   if (ready && m_wakeupPending) {
     m_wakeupPending = false;
-    logger.debug() << "Physical default route ready after wakeup";
+    logger.info() << "Physical default route ready after wakeup";
     emit wakeup();
   }
 }

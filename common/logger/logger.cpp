@@ -8,6 +8,7 @@
 #include <QMetaEnum>
 #include <QStandardPaths>
 #include <QUrl>
+#include <QCoreApplication>
 
 #include "core/utils/utilities.h"
 #include "version.h"
@@ -21,7 +22,9 @@
 #endif
 
 QFile Logger::m_file;
-QTextStream Logger::m_textStream;
+QRecursiveMutex Logger::m_mutex;
+QString Logger::m_basePath;
+bool Logger::m_debugEnabled = true;
 QString Logger::m_logFileName = QString("%1.log").arg(APPLICATION_NAME);
 QString Logger::m_serviceLogFileName = QString("%1.log").arg(SERVICE_NAME);
 
@@ -59,8 +62,41 @@ Logger &Logger::Instance()
     return s;
 }
 
-bool Logger::init(bool isServiceLogger)
+bool Logger::rotateLogFile(const QDateTime &now)
 {
+    if (m_basePath.isEmpty()) {
+        return false;
+    }
+    QString path = m_basePath;
+#if defined(Q_OS_MACOS) && !defined(MACOS_NE)
+    const QFileInfo base(m_basePath);
+    const QString prefix = base.completeBaseName() + '-';
+    path = base.absoluteDir().filePath(prefix + now.toString("yyyyMMdd-HH") + ".log");
+#endif
+    if (m_file.isOpen() && m_file.fileName() == path) {
+        return true;
+    }
+    m_file.close();
+    m_file.setFileName(path);
+    if (!m_file.open(QIODevice::Append | QIODevice::Text)) {
+        return false;
+    }
+#if defined(Q_OS_MACOS) && !defined(MACOS_NE)
+    const QString oldestHour = now.addSecs(-24 * 3600).toString("yyyyMMdd-HH");
+    const QDir dir = base.absoluteDir();
+    for (const QString &name : dir.entryList({prefix + "????????" "-??.log"}, QDir::Files)) {
+        const QString hour = name.mid(prefix.size(), 11);
+        if (QDateTime::fromString(hour, "yyyyMMdd-HH").isValid() && hour < oldestHour) {
+            QFile::remove(dir.filePath(name));
+        }
+    }
+#endif
+    return true;
+}
+
+bool Logger::init(bool isServiceLogger, bool debugEnabled)
+{
+    QMutexLocker lock(&m_mutex);
     QString path = isServiceLogger ? systemLogDir() : userLogsDir();
     QString logFileName = isServiceLogger ? m_serviceLogFileName : m_logFileName;
     QDir appDir(path);
@@ -68,24 +104,26 @@ bool Logger::init(bool isServiceLogger)
         return false;
     }
 
-    m_file.setFileName(appDir.filePath(logFileName));
-    if (!m_file.open(QIODevice::Append)) {
-        qWarning() << "Cannot open log file:" << logFileName;
+    m_basePath = appDir.filePath(logFileName);
+    m_debugEnabled = debugEnabled;
+    if (!rotateLogFile(QDateTime::currentDateTimeUtc())) {
         return false;
     }
-
-    m_file.setTextModeEnabled(true);
-    m_textStream.setDevice(&m_file);
-
     qInstallMessageHandler(messageHandler);
-
+    qInfo() << "Log session started pid=" << QCoreApplication::applicationPid()
+            << "debug=" << debugEnabled;
     return true;
 }
 
 void Logger::deInit()
 {
-    m_textStream.setDevice(nullptr);
+    QMutexLocker lock(&m_mutex);
+#if defined(Q_OS_MACOS) && !defined(MACOS_NE)
+    m_debugEnabled = false;
+#else
+    m_basePath.clear();
     m_file.close();
+#endif
 }
 
 bool Logger::setServiceLogsEnabled(bool enabled)
@@ -137,15 +175,7 @@ QString Logger::serviceLogsFilePath()
 
 QString Logger::getLogFile()
 {
-    if (m_file.isOpen()) {
-        m_file.flush();
-    }
-    QFile file(userLogsFilePath());
-
-    if (!file.open(QIODevice::ReadOnly)) {
-        return {};
-    }
-    QString qtLog = file.readAll();
+    const QString qtLog = readLogFiles(userLogsFilePath());
 
 #ifdef Q_OS_IOS
     return QString().fromStdString(SWIFT_BRIDGE_NAMESPACE::swiftUpdateLogData(qtLog.toStdString()));
@@ -156,21 +186,42 @@ QString Logger::getLogFile()
 
 QString Logger::getServiceLogFile()
 {
-    if (m_file.isOpen()) {
-        m_file.flush();
-    }
-    QFile file(serviceLogsFilePath());
-
-    if (!file.open(QIODevice::ReadOnly)) {
-        return {};
-    }
-    QString qtLog = file.readAll();
+    const QString qtLog = readLogFiles(serviceLogsFilePath());
 
 #ifdef Q_OS_IOS
     return QString().fromStdString(SWIFT_BRIDGE_NAMESPACE::swiftUpdateLogData(qtLog.toStdString()));
 #else
     return qtLog;
 #endif
+}
+
+QString Logger::readLogFiles(const QString &basePath)
+{
+    QMutexLocker lock(&m_mutex);
+    if (m_file.isOpen()) {
+        m_file.flush();
+    }
+    QStringList paths {basePath};
+#if defined(Q_OS_MACOS) && !defined(MACOS_NE)
+    const QFileInfo base(basePath);
+    const QDir dir = base.absoluteDir();
+    paths.clear();
+    const QString prefix = base.completeBaseName() + '-';
+    const QString oldestHour = QDateTime::currentDateTimeUtc().addSecs(-24 * 3600).toString("yyyyMMdd-HH");
+    for (const QString &name : dir.entryList({prefix + "????????" "-??.log"}, QDir::Files, QDir::Name)) {
+        if (name.mid(prefix.size(), 11) >= oldestHour) {
+            paths.append(dir.filePath(name));
+        }
+    }
+#endif
+    QString result;
+    for (const QString &path : paths) {
+        QFile file(path);
+        if (file.open(QIODevice::ReadOnly)) {
+            result += QString::fromUtf8(file.readAll());
+        }
+    }
+    return result;
 }
 
 bool Logger::openLogsFolder(bool isServiceLogger)
@@ -188,15 +239,25 @@ bool Logger::openLogsFolder(bool isServiceLogger)
 
 void Logger::clearLogs(bool isServiceLogger)
 {
+    QMutexLocker lock(&m_mutex);
     bool isLogActive = m_file.isOpen();
+    const bool debugEnabled = m_debugEnabled;
     m_file.close();
+
+#if defined(Q_OS_MACOS) && !defined(MACOS_NE)
+    const QFileInfo base(isServiceLogger ? serviceLogsFilePath() : userLogsFilePath());
+    const QDir dir = base.absoluteDir();
+    for (const QString &name : dir.entryList({base.completeBaseName() + "-????????" "-??.log"}, QDir::Files)) {
+        QFile::remove(dir.filePath(name));
+    }
+#endif
 
     QFile file(isServiceLogger ? serviceLogsFilePath() : userLogsFilePath());
 
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         qWarning() << "Can't clear log file:" << file.fileName();
         if (isLogActive) {
-            init(isServiceLogger);
+            init(isServiceLogger, debugEnabled);
         }
         return;
     }
@@ -208,7 +269,7 @@ void Logger::clearLogs(bool isServiceLogger)
 #endif
 
     if (isLogActive) {
-        init(isServiceLogger);
+        init(isServiceLogger, debugEnabled);
     }
 }
 
@@ -253,7 +314,9 @@ Logger::LogStreamer::~LogStreamer()
                                     .arg(QDateTime::currentDateTimeUtc().toString("[yyyy-MM-dd hh:mm:ss.zzzZ]"),
                                          logLevelString, APPLICATION_NAME, m_logger->className(), m_data->m_buffer.trimmed());
 
-    if (m_file.isOpen()) {
+    QMutexLocker lock(&m_mutex);
+    const bool saveMessage = m_debugEnabled || m_logLevel >= LogLevel::Info;
+    if (saveMessage && !m_basePath.isEmpty() && rotateLogFile(QDateTime::currentDateTimeUtc())) {
         QTextStream logToFile(&m_file);
         logToFile << message << Qt::endl << Qt::flush;
     }
