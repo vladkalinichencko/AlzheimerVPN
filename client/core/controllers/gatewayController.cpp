@@ -5,6 +5,7 @@
 #include <random>
 
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -18,6 +19,7 @@
 #include "amneziaApplication.h"
 #include "core/repositories/secureAppSettingsRepository.h"
 #include "core/utils/api/apiUtils.h"
+#include "core/utils/api/requestDeadline.h"
 #include "core/utils/constants/apiKeys.h"
 #include "core/utils/networkUtilities.h"
 #include "cryptoUtils.h"
@@ -116,6 +118,17 @@ GatewayController::GatewayController(const QString &gatewayEndpoint, const bool 
       m_isStrictKillSwitchEnabled(isStrictKillSwitchEnabled),
       m_appSettingsRepository(appSettingsRepository)
 {
+}
+
+void GatewayController::setOverallDeadline(int msecs)
+{
+    m_deadlineMsecsSinceEpoch = msecs > 0 ? QDateTime::currentMSecsSinceEpoch() + msecs : 0;
+}
+
+void GatewayController::execWithDeadline(QEventLoop &wait, QNetworkReply *reply)
+{
+    apiUtils::abortReplyAtDeadline(reply, m_deadlineMsecsSinceEpoch);
+    wait.exec(QEventLoop::ExcludeUserInputEvents);
 }
 
 GatewayController::EncryptedRequestData GatewayController::prepareRequest(const QString &endpoint, const QJsonObject &apiPayload)
@@ -218,7 +231,7 @@ ErrorCode GatewayController::post(const QString &endpoint, const QJsonObject api
 
     QList<QSslError> sslErrors;
     connect(reply, &QNetworkReply::sslErrors, [this, &sslErrors](const QList<QSslError> &errors) { sslErrors = errors; });
-    wait.exec(QEventLoop::ExcludeUserInputEvents);
+    execWithDeadline(wait, reply);
 
     QByteArray encryptedResponseBody = reply->readAll();
     QString replyErrorString = reply->errorString();
@@ -434,7 +447,7 @@ QStringList GatewayController::getProxyUrls(const QString &serviceType, const QS
 
         connect(reply, &QNetworkReply::finished, &wait, &QEventLoop::quit);
         connect(reply, &QNetworkReply::sslErrors, [this, &sslErrors](const QList<QSslError> &errors) { sslErrors = errors; });
-        wait.exec(QEventLoop::ExcludeUserInputEvents);
+        execWithDeadline(wait, reply);
 
         if (reply->error() == QNetworkReply::NetworkError::NoError) {
             auto encryptedResponseBody = reply->readAll();
@@ -555,7 +568,7 @@ void GatewayController::bypassProxy(const QString &endpoint, const QString &serv
 
         QObject::connect(reply, &QNetworkReply::finished, &wait, &QEventLoop::quit);
         connect(reply, &QNetworkReply::sslErrors, [this, &sslErrors](const QList<QSslError> &errors) { sslErrors = errors; });
-        wait.exec(QEventLoop::ExcludeUserInputEvents);
+        execWithDeadline(wait, reply);
 
         auto result = replyProcessingFunction(reply, sslErrors);
         reply->deleteLater();
@@ -577,7 +590,7 @@ void GatewayController::bypassProxy(const QString &endpoint, const QString &serv
 
             connect(reply, &QNetworkReply::finished, &wait, &QEventLoop::quit);
             connect(reply, &QNetworkReply::sslErrors, [this, &sslErrors](const QList<QSslError> &errors) { sslErrors = errors; });
-            wait.exec(QEventLoop::ExcludeUserInputEvents);
+            execWithDeadline(wait, reply);
 
             if (reply->error() == QNetworkReply::NetworkError::NoError) {
                 reply->deleteLater();

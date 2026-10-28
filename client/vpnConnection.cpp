@@ -43,6 +43,8 @@ using namespace ProtocolUtils;
 
 namespace {
 constexpr int kMaxConnectedRecoveryAttempts = 3;
+// QRemoteObjectPendingReply waits 30 s by default; a dead helper must not stall the state machine that long.
+constexpr int kIpcReplyTimeoutMsecs = 5000;
 
 ConnectionHealth connectionHealthForError(ErrorCode error)
 {
@@ -115,7 +117,8 @@ VpnConnection::VpnConnection(SecureServersRepository* serversRepository, SecureA
       m_connectingTimer(this),
       m_healthTimer(this),
       m_connectedRecoveryTimer(this),
-      m_pendingNetworkTimer(this)
+      m_pendingNetworkTimer(this),
+      m_pendingNetworkDeadlineTimer(this)
 {
     m_connectingTimer.setSingleShot(true);
     m_connectingTimer.setInterval(30000);
@@ -140,13 +143,24 @@ VpnConnection::VpnConnection(SecureServersRepository* serversRepository, SecureA
     connect(&m_pendingNetworkTimer, &QTimer::timeout,
             this, &VpnConnection::resumePendingNetworkAction);
 
+    m_pendingNetworkDeadlineTimer.setSingleShot(true);
+    m_pendingNetworkDeadlineTimer.setInterval(20000);
+    connect(&m_pendingNetworkDeadlineTimer, &QTimer::timeout, this, [this]() {
+        if (m_pendingNetworkAction != PendingNetworkAction::StartConnection) {
+            return;
+        }
+        qWarning() << "No physical default route after 20 s; giving up on VPN start";
+        stopPendingNetworkAction();
+        onConnectingTimedOut();
+    });
+
     m_dnsFlushDebounce.setSingleShot(true);
     m_dnsFlushDebounce.setInterval(500);
 #ifdef AMNEZIA_DESKTOP
     connect(&m_dnsFlushDebounce, &QTimer::timeout, this, []() {
         IpcClient::withInterface([](QSharedPointer<IpcInterfaceReplica> iface) {
             auto reply = iface->flushDns();
-            if (!reply.waitForFinished() || !reply.returnValue()) {
+            if (!reply.waitForFinished(kIpcReplyTimeoutMsecs) || !reply.returnValue()) {
                 qWarning() << "VpnConnection: debounced flushDns failed";
             }
         });
@@ -185,7 +199,7 @@ void VpnConnection::onKillSwitchModeChanged(bool enabled)
 #ifdef AMNEZIA_DESKTOP
     IpcClient::withInterface([enabled](QSharedPointer<IpcInterfaceReplica> iface){
         QRemoteObjectPendingReply<bool> reply = iface->refreshKillSwitch(enabled);
-        if (reply.waitForFinished() && reply.returnValue())
+        if (reply.waitForFinished(kIpcReplyTimeoutMsecs) && reply.returnValue())
             qDebug() << "VpnConnection::onKillSwitchModeChanged: Killswitch refreshed";
         else
             qWarning() << "VpnConnection::onKillSwitchModeChanged: Failed to execute remote refreshKillSwitch call";
@@ -332,7 +346,7 @@ void VpnConnection::onConnectionStateChanged(Vpn::ConnectionState state)
 
                 setConnectionHealth(ConnectionHealth::CheckingDns);
                 auto flushDns = iface->flushDns();
-                if (flushDns.waitForFinished() && flushDns.returnValue())
+                if (flushDns.waitForFinished(kIpcReplyTimeoutMsecs) && flushDns.returnValue())
                     qDebug() << "VpnConnection::onConnectionStateChanged: Successfully flushed DNS";
                 else {
                     setConnectionHealth(ConnectionHealth::DnsFailed);
@@ -364,19 +378,19 @@ void VpnConnection::onConnectionStateChanged(Vpn::ConnectionState state)
                             setConnectionHealth(ConnectionHealth::ApplyingRoutes);
                             auto routeFirstHalf = iface->routeAddList(m_vpnProtocol->vpnGateway(), QStringList() << "0.0.0.0/1");
                             auto routeSecondHalf = iface->routeAddList(m_vpnProtocol->vpnGateway(), QStringList() << "128.0.0.0/1");
-                            if (!routeFirstHalf.waitForFinished() || routeFirstHalf.returnValue() != 1 ||
-                                !routeSecondHalf.waitForFinished() || routeSecondHalf.returnValue() != 1) {
+                            if (!routeFirstHalf.waitForFinished(kIpcReplyTimeoutMsecs) || routeFirstHalf.returnValue() != 1 ||
+                                !routeSecondHalf.waitForFinished(kIpcReplyTimeoutMsecs) || routeSecondHalf.returnValue() != 1) {
                                 setConnectionHealth(ConnectionHealth::RouteMismatch);
                             }
 
                             auto remoteRoute = iface->routeAddList(m_vpnProtocol->routeGateway(), QStringList() << remoteAddress());
-                            if (!remoteRoute.waitForFinished() || remoteRoute.returnValue() != 1) {
+                            if (!remoteRoute.waitForFinished(kIpcReplyTimeoutMsecs) || remoteRoute.returnValue() != 1) {
                                 setConnectionHealth(ConnectionHealth::RouteMismatch);
                             }
 #ifdef Q_OS_MACOS
                             setConnectionHealth(ConnectionHealth::CheckingDns);
                             auto dnsRoutes = iface->routeAddList(m_vpnProtocol->routeGateway(), QStringList() << dns1 << dns2);
-                            if (!dnsRoutes.waitForFinished() || dnsRoutes.returnValue() != 2) {
+                            if (!dnsRoutes.waitForFinished(kIpcReplyTimeoutMsecs) || dnsRoutes.returnValue() != 2) {
                                 setConnectionHealth(ConnectionHealth::DnsFailed);
                             }
 #endif
@@ -553,7 +567,7 @@ bool VpnConnection::addSplitTunnelRoutes(const QString &gw, amnezia::RouteMode m
     setConnectionHealth(ConnectionHealth::ApplyingRoutes);
     IpcClient::withInterface([this, gw, mode, ips, &ok](QSharedPointer<IpcInterfaceReplica> iface) {
         auto routeReply = iface->routeAddList(gw, ips);
-        ok = routeReply.waitForFinished() && routeReply.returnValue() == ips.count();
+        ok = routeReply.waitForFinished(kIpcReplyTimeoutMsecs) && routeReply.returnValue() == ips.count();
         if (!ok) {
             setConnectionHealth(ConnectionHealth::RouteMismatch);
         }
@@ -563,7 +577,7 @@ bool VpnConnection::addSplitTunnelRoutes(const QString &gw, amnezia::RouteMode m
         if (!allowedIps.isEmpty()) {
             setConnectionHealth(ConnectionHealth::CheckingFirewall);
             auto allowReply = iface->addKillSwitchAllowedRange(allowedIps);
-            if (!allowReply.waitForFinished() || !allowReply.returnValue()) {
+            if (!allowReply.waitForFinished(kIpcReplyTimeoutMsecs) || !allowReply.returnValue()) {
                 setConnectionHealth(ConnectionHealth::FirewallBlocked);
                 ok = false;
                 qWarning() << "VpnConnection::addSplitTunnelRoutes: Failed to update killswitch allowed ranges";
@@ -681,7 +695,7 @@ void VpnConnection::connectToVpn(const QString &serverId, DockerContainer contai
         [this, firewallConfig](QSharedPointer<IpcInterfaceReplica> iface) {
             auto reply = iface->setConnectionProtection(
                 m_appSettingsRepository->isKillSwitchEnabled(), firewallConfig);
-            return reply.waitForFinished() && reply.returnValue();
+            return reply.waitForFinished(kIpcReplyTimeoutMsecs) && reply.returnValue();
         });
     if (!protectedConnection) {
         markLastError(ErrorCode::AmneziaServiceConnectionFailed);
@@ -982,7 +996,7 @@ bool VpnConnection::physicalNetworkReady() const
     bool ready = true;
     IpcClient::withInterface([&](QSharedPointer<IpcInterfaceReplica> iface) {
         auto reply = iface->physicalNetworkReady();
-        if (reply.waitForFinished()) {
+        if (reply.waitForFinished(kIpcReplyTimeoutMsecs)) {
             ready = reply.returnValue();
             queryCompleted = true;
         }
@@ -1006,6 +1020,9 @@ bool VpnConnection::deferUntilPhysicalNetworkReady(
 
     m_pendingNetworkAction = action;
     m_pendingNetworkTimer.start();
+    if (action == PendingNetworkAction::StartConnection) {
+        m_pendingNetworkDeadlineTimer.start();
+    }
     stopConnectingWatchdog();
     stopConnectedRecovery();
     stopConnectivityProbe();
@@ -1165,7 +1182,7 @@ void VpnConnection::disconnectFromVpn()
 #if defined(Q_OS_MACOS) && !defined(MACOS_NE)
     IpcClient::withInterface([](QSharedPointer<IpcInterfaceReplica> iface) {
         auto reply = iface->setConnectionProtection(false, QJsonObject());
-        if (!reply.waitForFinished() || !reply.returnValue()) {
+        if (!reply.waitForFinished(kIpcReplyTimeoutMsecs) || !reply.returnValue()) {
             qWarning() << "Failed to release connection kill switch";
         }
     });
@@ -1457,6 +1474,7 @@ void VpnConnection::stopPendingNetworkAction()
 {
     m_pendingNetworkAction = PendingNetworkAction::None;
     m_pendingNetworkTimer.stop();
+    m_pendingNetworkDeadlineTimer.stop();
 }
 
 void VpnConnection::startConnectedHealthCheck()
@@ -1485,7 +1503,12 @@ void VpnConnection::stopConnectedRecovery()
 
 void VpnConnection::checkDnsHealth()
 {
-    QHostInfo::lookupHost(QStringLiteral("cloudflare.com"), this, [this](const QHostInfo &hostInfo) {
+    const qint64 started = QDateTime::currentMSecsSinceEpoch();
+    QHostInfo::lookupHost(QStringLiteral("cloudflare.com"), this, [this, started](const QHostInfo &hostInfo) {
+        qInfo() << "DNS health check host=" << hostInfo.hostName()
+                << "elapsed_ms=" << QDateTime::currentMSecsSinceEpoch() - started
+                << "error=" << hostInfo.error() << hostInfo.errorString()
+                << "addresses=" << hostInfo.addresses().size();
         if (m_connectionState != Vpn::ConnectionState::Connected) {
             return;
         }
@@ -1560,14 +1583,18 @@ void VpnConnection::startConnectivityProbe()
 
     auto *socket = new QTcpSocket(this);
     m_connectivityProbe.reset(socket);
+    m_connectivityProbeStartedMs = QDateTime::currentMSecsSinceEpoch();
 
     connect(socket, &QTcpSocket::connected, this, [this]() {
-        qInfo() << "Connectivity probe to 1.1.1.1:443 succeeded";
+        const qint64 connectMs = QDateTime::currentMSecsSinceEpoch() - m_connectivityProbeStartedMs;
+        qInfo() << "Connectivity probe to 1.1.1.1:443 succeeded connect_ms=" << connectMs;
+        recordConnectivityProbe(connectMs);
         onConnectivityProbeSucceeded();
     });
     connect(socket, &QTcpSocket::errorOccurred, this, [this, socket](QAbstractSocket::SocketError error) {
         qWarning() << "Connectivity probe to 1.1.1.1:443 failed"
                    << error << socket->errorString();
+        recordConnectivityProbe(-1);
         onConnectivityProbeFailed();
     });
 
@@ -1575,11 +1602,43 @@ void VpnConnection::startConnectivityProbe()
     QTimer::singleShot(5000, this, [this, probe]() {
         if (probe && m_connectivityProbe.get() == probe && probe->state() != QAbstractSocket::ConnectedState) {
             qWarning() << "Connectivity probe to 1.1.1.1:443 timed out";
+            recordConnectivityProbe(-1);
             onConnectivityProbeFailed();
         }
     });
 
     connectConnectivityProbe(socket);
+}
+
+// macOS retransmits a lost SYN after one second, so a connect that took a second
+// or longer lost at least one packet on the path even though the probe succeeded.
+void VpnConnection::recordConnectivityProbe(qint64 connectMs)
+{
+    constexpr int kWindowSize = 20;
+    constexpr qint64 kLostSynMs = 1000;
+
+    m_connectivityProbeWindow.append(connectMs);
+    while (m_connectivityProbeWindow.size() > kWindowSize) {
+        m_connectivityProbeWindow.removeFirst();
+    }
+
+    int failed = 0;
+    int retransmitted = 0;
+    qint64 worstMs = 0;
+    for (const qint64 sample : std::as_const(m_connectivityProbeWindow)) {
+        if (sample < 0) {
+            ++failed;
+        } else if (sample >= kLostSynMs) {
+            ++retransmitted;
+        }
+        worstMs = qMax(worstMs, sample);
+    }
+    if (failed + retransmitted == 0) {
+        return;
+    }
+    qWarning() << "Connectivity probe window samples=" << m_connectivityProbeWindow.size()
+               << "failed=" << failed << "syn_retransmitted=" << retransmitted
+               << "worst_connect_ms=" << worstMs;
 }
 
 void VpnConnection::stopConnectivityProbe()

@@ -720,38 +720,45 @@ void SubscriptionUiController::validateConfig()
         return;
     }
 
+    if (m_isValidatingConfig) {
+        return;
+    }
+    m_isValidatingConfig = true;
+
     bool hasInstalledContainers = m_serversController->hasInstalledContainers(serverId);
 
-    SubscriptionController::CaptchaInfo captchaInfo;
-    SubscriptionController::ProtocolData usedProtocolData;
-    ErrorCode errorCode = m_subscriptionController->validateAndUpdateConfig(serverId, hasInstalledContainers,
-                                                                            &captchaInfo, &usedProtocolData);
+    m_subscriptionController->validateAndUpdateConfigAsync(
+            serverId, hasInstalledContainers,
+            [this, serverId](ErrorCode errorCode, SubscriptionController::CaptchaInfo captchaInfo,
+                             SubscriptionController::ProtocolData usedProtocolData) {
+                m_isValidatingConfig = false;
 
-    if (errorCode == ErrorCode::ApiCaptchaRequiredError && captchaInfo.isRequired) {
-        m_captchaState = CaptchaState{};
-        m_captchaState.flow = CaptchaFlow::Update;
-        m_captchaState.fromValidateConfig = true;
-        m_captchaState.serverId = serverId;
-        m_captchaState.isConnectEvent = true;
-        m_captchaState.updateProtocolData = usedProtocolData;
-        m_captchaState.isPending = true;
+                if (errorCode == ErrorCode::ApiCaptchaRequiredError && captchaInfo.isRequired) {
+                    m_captchaState = CaptchaState{};
+                    m_captchaState.flow = CaptchaFlow::Update;
+                    m_captchaState.fromValidateConfig = true;
+                    m_captchaState.serverId = serverId;
+                    m_captchaState.isConnectEvent = true;
+                    m_captchaState.updateProtocolData = usedProtocolData;
+                    m_captchaState.isPending = true;
 
-        emit captchaRequired(captchaInfo.captchaId, captchaInfo.captchaImageBase64,
-                             captchaInfo.hint.isEmpty() ? tr("Enter the digits from the image to continue") : captchaInfo.hint);
-        emit configValidated(false);
-        return;
-    }
+                    emit captchaRequired(captchaInfo.captchaId, captchaInfo.captchaImageBase64,
+                                         captchaInfo.hint.isEmpty() ? tr("Enter the digits from the image to continue") : captchaInfo.hint);
+                    emit configValidated(false);
+                    return;
+                }
 
-    if (errorCode != ErrorCode::NoError) {
-        if (errorCode == ErrorCode::ApiSubscriptionExpiredError) {
-            emit subscriptionExpiredOnServer();
-        } else {
-            emit errorOccurred(errorCode);
-        }
-        emit configValidated(false);
-        return;
-    }
-    emit configValidated(true);
+                if (errorCode != ErrorCode::NoError) {
+                    if (errorCode == ErrorCode::ApiSubscriptionExpiredError) {
+                        emit subscriptionExpiredOnServer();
+                    } else {
+                        emit errorOccurred(errorCode);
+                    }
+                    emit configValidated(false);
+                    return;
+                }
+                emit configValidated(true);
+            });
 }
 
 void SubscriptionUiController::setCurrentProtocol(const QString &serverId, const QString &protocolName)

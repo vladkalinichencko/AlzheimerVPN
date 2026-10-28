@@ -103,12 +103,18 @@ private:
     QTimer m_healthTimer;
     QTimer m_connectedRecoveryTimer;
     QTimer m_pendingNetworkTimer;
+    // Ends a first connect attempt that still has no physical default route.
+    QTimer m_pendingNetworkDeadlineTimer;
     // Single debounced flushDns after the per-site route batch completes — the
     // previous design called flushDns once per resolved site and produced
     // hundreds of "Failed to flush DNS" warnings on configs with large split
     // lists (and also slowed teardown by piling work on the daemon).
     QTimer m_dnsFlushDebounce;
     std::unique_ptr<QTcpSocket> m_connectivityProbe;
+    qint64 m_connectivityProbeStartedMs = 0;
+    // Connect time of the last probes in ms, -1 for a failed probe.
+    QList<qint64> m_connectivityProbeWindow;
+    void recordConnectivityProbe(qint64 connectMs);
 
 #ifdef Q_OS_ANDROID
    AndroidVpnProtocol* androidVpnProtocol = nullptr;

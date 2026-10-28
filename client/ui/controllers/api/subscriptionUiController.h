@@ -135,6 +135,7 @@ private:
     } m_captchaState;
 
 private:
+    bool m_isValidatingConfig = false;
     void emitUpdateSuccess(bool wasSubscriptionExpired, bool reloadServiceConfig, const QString &newCountryName);
     void emitCaptchaUpdateSuccess();
     void resolveUpdateCaptcha(const QString &captchaId, const QString &solution);

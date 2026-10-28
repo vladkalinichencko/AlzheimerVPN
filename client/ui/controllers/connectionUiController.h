@@ -2,6 +2,7 @@
 #define CONNECTIONUICONTROLLER_H
 
 #include <QObject>
+#include <QTimer>
 
 #include "core/controllers/connectionController.h"
 #include "core/utils/errorCodes.h"
@@ -76,6 +77,8 @@ private:
     bool m_isConnectionDiagnosticProblem = false;
 
     Vpn::ConnectionState m_state;
+    // Returns the UI to Disconnected when config preparation never reports back.
+    QTimer m_preparingWatchdog;
     ConnectionHealth m_health = ConnectionHealth::Idle;
 };
 

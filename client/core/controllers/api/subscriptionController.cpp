@@ -6,6 +6,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QPromise>
+#include <QTimer>
 #include <QUuid>
 
 #include "core/configurators/openVpnConfigurator.h"
@@ -218,11 +219,41 @@ void SubscriptionController::updateApiConfigInJson(QJsonObject &serverConfigJson
     serverConfigJson[apiDefs::key::apiConfig] = apiConfig;
 }
 
-ErrorCode SubscriptionController::executeRequest(const QString &endpoint, const QJsonObject &apiPayload, QByteArray &responseBody, bool isTestPurchase)
+ErrorCode SubscriptionController::executeRequest(const QString &endpoint, const QJsonObject &apiPayload, QByteArray &responseBody, bool isTestPurchase,
+                                         int overallDeadlineMsecs)
 {
     GatewayController gatewayController(m_appSettingsRepository->getGatewayEndpoint(isTestPurchase), m_appSettingsRepository->isDevGatewayEnv(isTestPurchase), apiDefs::requestTimeoutMsecs,
                                         m_appSettingsRepository->isStrictKillSwitchEnabled(), m_appSettingsRepository);
+    gatewayController.setOverallDeadline(overallDeadlineMsecs);
     return gatewayController.post(endpoint, apiPayload, responseBody);
+}
+
+void SubscriptionController::executeRequestAsync(const QString &endpoint, const QJsonObject &apiPayload, bool isTestPurchase,
+                                                 int overallDeadlineMsecs,
+                                                 std::function<void(ErrorCode, const QByteArray &)> onDone)
+{
+    auto *gatewayController = new GatewayController(m_appSettingsRepository->getGatewayEndpoint(isTestPurchase),
+                                                    m_appSettingsRepository->isDevGatewayEnv(isTestPurchase), apiDefs::requestTimeoutMsecs,
+                                                    m_appSettingsRepository->isStrictKillSwitchEnabled(), m_appSettingsRepository);
+    auto watcher = new QFutureWatcher<QPair<ErrorCode, QByteArray>>(gatewayController);
+    auto finished = QSharedPointer<bool>::create(false);
+
+    // The first of the reply and the deadline wins; deleting the controller drops the other.
+    auto finish = [gatewayController, finished, onDone](ErrorCode errorCode, const QByteArray &responseBody) {
+        if (*finished) {
+            return;
+        }
+        *finished = true;
+        gatewayController->deleteLater();
+        onDone(errorCode, responseBody);
+    };
+
+    QObject::connect(watcher, &QFutureWatcherBase::finished, gatewayController, [watcher, finish]() {
+        const auto result = watcher->result();
+        finish(result.first, result.second);
+    });
+    QTimer::singleShot(overallDeadlineMsecs, gatewayController, [finish]() { finish(ErrorCode::ApiConfigTimeoutError, QByteArray()); });
+    watcher->setFuture(gatewayController->postAsync(endpoint, apiPayload));
 }
 
 ErrorCode SubscriptionController::importServiceFromGateway(const QString &userCountryCode, const QString &serviceType,
@@ -331,14 +362,14 @@ ErrorCode SubscriptionController::importTrialFromGateway(const QString &userCoun
     return ErrorCode::NoError;
 }
 
-ErrorCode SubscriptionController::updateServiceFromGateway(const QString &serverId, const QString &newCountryCode, bool isConnectEvent,
-                                                           CaptchaInfo *captchaInfoOut, ProtocolData *usedProtocolDataOut)
+ErrorCode SubscriptionController::prepareUpdateRequest(const QString &serverId, const QString &newCountryCode, bool isConnectEvent,
+                                                       UpdateRequest &request)
 {
     auto apiV2 = m_serversRepository->apiV2Config(serverId);
     if (!apiV2.has_value()) {
         return ErrorCode::InternalError;
     }
-    const bool isTestPurchase = apiV2->apiConfig.isTestPurchase;
+    request.isTestPurchase = apiV2->apiConfig.isTestPurchase;
     QString serviceProtocol = apiV2->serviceProtocol();
 
     if (!newCountryCode.isEmpty()) {
@@ -357,20 +388,32 @@ ErrorCode SubscriptionController::updateServiceFromGateway(const QString &server
         }
     }
 
-    ProtocolData protocolData = generateProtocolData(serviceProtocol);
+    request.serviceProtocol = serviceProtocol;
+    request.protocolData = generateProtocolData(serviceProtocol);
 
-    QJsonObject apiPayload = GatewayPayloadBuilder(m_appSettingsRepository)
-                                     .addField(apiDefs::key::userCountryCode, apiV2->apiConfig.userCountryCode)
-                                     .addField(apiDefs::key::serverCountryCode, newCountryCode)
-                                     .addField(apiDefs::key::serviceType, apiV2->serviceType())
-                                     .addField(apiDefs::key::serviceProtocol, serviceProtocol)
-                                     .addField(apiDefs::key::publicKey, publicKeyForProtocol(serviceProtocol, protocolData))
-                                     .addField(apiDefs::key::authData, apiV2->authData.toJson())
-                                     .addField(apiDefs::key::isConnectEvent, isConnectEvent ? QJsonValue(true) : QJsonValue())
-                                     .build();
+    request.payload = GatewayPayloadBuilder(m_appSettingsRepository)
+                              .addField(apiDefs::key::userCountryCode, apiV2->apiConfig.userCountryCode)
+                              .addField(apiDefs::key::serverCountryCode, newCountryCode)
+                              .addField(apiDefs::key::serviceType, apiV2->serviceType())
+                              .addField(apiDefs::key::serviceProtocol, serviceProtocol)
+                              .addField(apiDefs::key::publicKey, publicKeyForProtocol(serviceProtocol, request.protocolData))
+                              .addField(apiDefs::key::authData, apiV2->authData.toJson())
+                              .addField(apiDefs::key::isConnectEvent, isConnectEvent ? QJsonValue(true) : QJsonValue())
+                              .build();
+    return ErrorCode::NoError;
+}
 
-    QByteArray responseBody;
-    ErrorCode errorCode = executeRequest(QString("%1v1/config"), apiPayload, responseBody, isTestPurchase);
+ErrorCode SubscriptionController::finishUpdateRequest(const QString &serverId, bool isConnectEvent, const UpdateRequest &request,
+                                                      ErrorCode errorCode, const QByteArray &responseBody,
+                                                      CaptchaInfo *captchaInfoOut, ProtocolData *usedProtocolDataOut)
+{
+    auto apiV2 = m_serversRepository->apiV2Config(serverId);
+    if (!apiV2.has_value()) {
+        return ErrorCode::InternalError;
+    }
+    const QString &serviceProtocol = request.serviceProtocol;
+    const ProtocolData &protocolData = request.protocolData;
+
     if (errorCode != ErrorCode::NoError) {
         if (errorCode == ErrorCode::ApiCaptchaRequiredError && captchaInfoOut) {
             if (fillCaptchaInfoFromResponse(responseBody, *captchaInfoOut) && usedProtocolDataOut) {
@@ -394,6 +437,48 @@ ErrorCode SubscriptionController::updateServiceFromGateway(const QString &server
     }
 
     return applyUpdatedServiceConfig(serverId, serviceProtocol, protocolData, responseBody);
+}
+
+ErrorCode SubscriptionController::updateServiceFromGateway(const QString &serverId, const QString &newCountryCode, bool isConnectEvent,
+                                                           CaptchaInfo *captchaInfoOut, ProtocolData *usedProtocolDataOut)
+{
+    UpdateRequest request;
+    ErrorCode errorCode = prepareUpdateRequest(serverId, newCountryCode, isConnectEvent, request);
+    if (errorCode != ErrorCode::NoError) {
+        return errorCode;
+    }
+
+    QByteArray responseBody;
+    errorCode = executeRequest(QString("%1v1/config"), request.payload, responseBody, request.isTestPurchase,
+                               isConnectEvent ? apiDefs::connectConfigRefreshDeadlineMsecs : 0);
+    return finishUpdateRequest(serverId, isConnectEvent, request, errorCode, responseBody, captchaInfoOut, usedProtocolDataOut);
+}
+
+void SubscriptionController::validateAndUpdateConfigAsync(const QString &serverId, bool hasInstalledContainers,
+                                                          std::function<void(ErrorCode, CaptchaInfo, ProtocolData)> onDone)
+{
+    auto apiV2 = m_serversRepository->apiV2Config(serverId);
+    const bool needsRefresh = apiV2.has_value() && (!hasInstalledContainers || isApiKeyExpired(serverId));
+    if (!needsRefresh) {
+        onDone(ErrorCode::NoError, CaptchaInfo{}, ProtocolData{});
+        return;
+    }
+
+    auto request = QSharedPointer<UpdateRequest>::create();
+    ErrorCode errorCode = prepareUpdateRequest(serverId, "", true, *request);
+    if (errorCode != ErrorCode::NoError) {
+        onDone(errorCode, CaptchaInfo{}, ProtocolData{});
+        return;
+    }
+
+    executeRequestAsync(QString("%1v1/config"), request->payload, request->isTestPurchase, apiDefs::connectConfigRefreshDeadlineMsecs,
+                        [this, serverId, request, onDone](ErrorCode errorCode, const QByteArray &responseBody) {
+                            CaptchaInfo captchaInfo;
+                            ProtocolData usedProtocolData;
+                            errorCode = finishUpdateRequest(serverId, true, *request, errorCode, responseBody, &captchaInfo,
+                                                            &usedProtocolData);
+                            onDone(errorCode, captchaInfo, usedProtocolData);
+                        });
 }
 
 void SubscriptionController::markSubscriptionExpiredByServer(const QString &serverId, const ApiV2ServerConfig &apiV2)

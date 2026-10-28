@@ -1,6 +1,7 @@
 #ifndef GATEWAYCONTROLLER_H
 #define GATEWAYCONTROLLER_H
 
+#include <QEventLoop>
 #include <QFuture>
 #include <QNetworkReply>
 #include <QObject>
@@ -26,6 +27,9 @@ public:
     explicit GatewayController(const QString &gatewayEndpoint, const bool isDevEnvironment, const int requestTimeoutMsecs,
                                const bool isStrictKillSwitchEnabled, SecureAppSettingsRepository *appSettingsRepository,
                                QObject *parent = nullptr);
+
+    // Aborts every request still pending after msecs from now; 0 means no deadline.
+    void setOverallDeadline(int msecs);
 
     amnezia::ErrorCode post(const QString &endpoint, const QJsonObject apiPayload, QByteArray &responseBody);
     QFuture<QPair<amnezia::ErrorCode, QByteArray>> postAsync(const QString &endpoint, const QJsonObject apiPayload);
@@ -64,7 +68,10 @@ private:
             const QString &endpoint, const QString &proxyUrl, EncryptedRequestData encRequestData,
             std::function<void(const QByteArray &, bool, const QList<QSslError> &, QNetworkReply::NetworkError, const QString &, int)> onComplete);
 
+    void execWithDeadline(QEventLoop &wait, QNetworkReply *reply);
+
     int m_requestTimeoutMsecs;
+    qint64 m_deadlineMsecsSinceEpoch = 0;
     QString m_gatewayEndpoint;
     bool m_isDevEnvironment = false;
     bool m_isStrictKillSwitchEnabled = false;

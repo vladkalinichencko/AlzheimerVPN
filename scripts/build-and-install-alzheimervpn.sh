@@ -26,7 +26,9 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="/private/tmp/alzheimervpn-build"
 STAGE_APP="/private/tmp/AlzheimerVPN.app"
 TARGET_APP="/Applications/AlzheimerVPN.app"
-ORIGINAL_APP="/Applications/AmneziaVPN.app"
+# AGW keys and S3 endpoints are read from this bundle's AmneziaVPN binary. Point it at
+# /Applications/AlzheimerVPN.app when the original Amnezia app is not installed.
+ORIGINAL_APP="${ORIGINAL_APP:-/Applications/AmneziaVPN.app}"
 KEY1="/private/tmp/agw_key_1.pem"
 KEY2="/private/tmp/agw_key_2.pem"
 KEY1_ESC="/private/tmp/agw_key_1.escaped"

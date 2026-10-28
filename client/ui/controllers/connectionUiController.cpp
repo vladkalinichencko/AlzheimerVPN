@@ -23,6 +23,17 @@ ConnectionUiController::ConnectionUiController(ConnectionController* connectionC
 
     connect(this, &ConnectionUiController::connectButtonClicked, this, &ConnectionUiController::toggleConnection, Qt::QueuedConnection);
 
+    m_preparingWatchdog.setSingleShot(true);
+    m_preparingWatchdog.setInterval(40000);
+    connect(&m_preparingWatchdog, &QTimer::timeout, this, [this]() {
+        if (m_state != Vpn::ConnectionState::Preparing) {
+            return;
+        }
+        qWarning() << "Config preparation did not finish in 40 s";
+        m_connectionController->setConnectionState(Vpn::ConnectionState::Disconnected);
+        emit connectionErrorOccurred(ErrorCode::ApiConfigTimeoutError);
+    });
+
     m_state = Vpn::ConnectionState::Disconnected;
 }
 
@@ -56,6 +67,11 @@ void ConnectionUiController::onConnectionStateChanged(Vpn::ConnectionState state
 {
     m_state = state;
     m_health = m_connectionController->connectionHealth();
+    if (state == Vpn::ConnectionState::Preparing) {
+        m_preparingWatchdog.start();
+    } else {
+        m_preparingWatchdog.stop();
+    }
 
     m_isConnected = false;
     updateConnectionStateText();

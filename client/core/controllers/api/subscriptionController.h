@@ -5,6 +5,8 @@
 #include <QByteArray>
 #include <QFuture>
 
+#include <functional>
+
 #include "core/utils/errorCodes.h"
 #include "core/utils/routeModes.h"
 #include "core/utils/commonStructs.h"
@@ -65,6 +67,11 @@ public:
     ErrorCode validateAndUpdateConfig(const QString &serverId, bool hasInstalledContainers,
                                       CaptchaInfo *captchaInfoOut = nullptr, ProtocolData *usedProtocolDataOut = nullptr);
 
+    // Same decision as validateAndUpdateConfig, but the gateway request does not block the calling thread.
+    // onDone runs on the calling thread's event loop (or immediately when no refresh is needed).
+    void validateAndUpdateConfigAsync(const QString &serverId, bool hasInstalledContainers,
+                                      std::function<void(ErrorCode, CaptchaInfo, ProtocolData)> onDone);
+
     void removeApiConfig(const QString &serverId);
 
     bool removeServer(const QString &serverId);
@@ -83,7 +90,21 @@ public:
                                           CaptchaInfo *retryCaptchaOut = nullptr);
 
 private:
-    ErrorCode executeRequest(const QString &endpoint, const QJsonObject &apiPayload, QByteArray &responseBody, bool isTestPurchase = false);
+    ErrorCode executeRequest(const QString &endpoint, const QJsonObject &apiPayload, QByteArray &responseBody, bool isTestPurchase = false,
+                          int overallDeadlineMsecs = 0);
+    void executeRequestAsync(const QString &endpoint, const QJsonObject &apiPayload, bool isTestPurchase, int overallDeadlineMsecs,
+                             std::function<void(ErrorCode, const QByteArray &)> onDone);
+
+    struct UpdateRequest
+    {
+        QJsonObject payload;
+        QString serviceProtocol;
+        ProtocolData protocolData;
+        bool isTestPurchase = false;
+    };
+    ErrorCode prepareUpdateRequest(const QString &serverId, const QString &newCountryCode, bool isConnectEvent, UpdateRequest &request);
+    ErrorCode finishUpdateRequest(const QString &serverId, bool isConnectEvent, const UpdateRequest &request, ErrorCode errorCode,
+                                  const QByteArray &responseBody, CaptchaInfo *captchaInfoOut, ProtocolData *usedProtocolDataOut);
     bool isApiKeyExpired(const QString &serverId) const;
     
     ErrorCode extractServerConfigJsonFromResponse(const QByteArray &apiResponseBody, const QString &protocol,
