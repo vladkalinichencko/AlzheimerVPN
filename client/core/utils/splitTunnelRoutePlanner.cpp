@@ -2,6 +2,9 @@
 
 #include <QHostAddress>
 
+#include "core/utils/networkUtilities.h"
+#include "core/utils/splitTunnelRule.h"
+
 using namespace amnezia;
 
 QStringList SplitTunnelRoutePlanner::resolvedIpv4Routes(const QHostInfo &hostInfo, const QStringList &alreadyRoutedIps)
@@ -30,4 +33,28 @@ QStringList SplitTunnelRoutePlanner::killSwitchAllowedIps(RouteMode mode, bool k
         return routeIps;
     }
     return {};
+}
+
+QStringList SplitTunnelRoutePlanner::cachedSiteIps(const QVariantMap &sites)
+{
+    QStringList ips;
+    for (auto it = sites.constBegin(); it != sites.constEnd(); ++it) {
+        const SplitTunnelRule rule = SplitTunnelRule::fromText(it.key());
+        if (!rule.isValid()) {
+            continue;
+        }
+        if (rule.type() == SplitTunnelRule::Type::IpSubnet) {
+            ips.append(rule.normalizedText());
+        } else {
+            ips.append(it.value().toStringList());
+        }
+    }
+
+    QStringList result;
+    for (const QString &ip : std::as_const(ips)) {
+        if (NetworkUtilities::checkIpSubnetFormat(ip) && !result.contains(ip)) {
+            result.append(ip);
+        }
+    }
+    return result;
 }

@@ -22,10 +22,13 @@ public:
     bool addAllowedRange(const QStringList &ranges);
     bool removeAllowedRange(const QStringList &ranges);
     bool isStrictKillSwitchEnabled();
+    bool setAlwaysBlockedSites(const QStringList &ranges);
 
 private:
     KillSwitch(QObject* parent) {};
+    void applyAlwaysBlockedSites();
     QStringList m_allowedRanges;
+    QStringList m_alwaysBlockedSites;
     bool m_connectionProtection = false;
     QSharedPointer<SecureQSettings> m_appSettigns;
 

@@ -9,6 +9,7 @@
 
 static QSet<QString> anchors;
 static QStringList allowed;
+static QStringList blocked;
 static bool installed = false;
 static bool installFails = false;
 static bool strict = false;
@@ -23,9 +24,10 @@ void MacOSFirewall::setAnchorEnabled(const QString &anchor, bool enabled)
     if (enabled) anchors.insert(anchor);
     else anchors.remove(anchor);
 }
-void MacOSFirewall::setAnchorTable(const QString &, bool, const QString &table, const QStringList &items)
+void MacOSFirewall::setAnchorTable(const QString &, bool enabled, const QString &table, const QStringList &items)
 {
     if (table == "allownets") allowed = items;
+    if (table == "blocknets") blocked = enabled ? items : QStringList();
 }
 
 SecureQSettings::SecureQSettings(const QString &, const QString &, QObject *parent, bool)
@@ -78,6 +80,26 @@ int main(int argc, char **argv)
     killSwitch->setConnectionProtection(false, {});
 
     config.insert("splitTunnelType", 0);
+    check(!killSwitch->setAlwaysBlockedSites({"not-an-ip"}), "invalid always-blocked site was accepted");
+    check(!installed, "invalid always-blocked site touched the firewall");
+    check(killSwitch->setAlwaysBlockedSites({"203.0.113.77", "198.51.100.0/24"}), "always-blocked sites did not arm");
+    check(installed && anchors.contains("120.blockNets") && anchors.contains("200.allowVPN")
+          && !anchors.contains("100.blockAll"), "idle block changed ordinary traffic");
+    check(blocked == QStringList({"203.0.113.77", "198.51.100.0/24"}), "idle block table is wrong");
+    check(killSwitch->setConnectionProtection(true, config), "protection failed with always-blocked sites");
+    check(anchors.contains("100.blockAll") && !anchors.contains("120.blockNets"),
+          "protection did not replace the idle block");
+    check(killSwitch->setAlwaysBlockedSites({"203.0.113.88"}), "update during protection failed");
+    check(anchors.contains("100.blockAll") && !anchors.contains("120.blockNets"),
+          "update during protection touched the connection rules");
+    killSwitch->disableKillSwitch();
+    check(anchors.contains("100.blockAll"), "protocol cleanup released the connection protection");
+    check(killSwitch->setConnectionProtection(false, {}), "disconnect failed with always-blocked sites");
+    check(installed && anchors.contains("120.blockNets") && !anchors.contains("100.blockAll")
+          && blocked == QStringList({"203.0.113.88"}), "disconnect did not return to the always-blocked sites");
+    check(killSwitch->setAlwaysBlockedSites({}), "release failed");
+    check(!installed, "release kept the firewall installed");
+
     strict = true;
     killSwitch->setConnectionProtection(true, config);
     killSwitch->setConnectionProtection(false, {});

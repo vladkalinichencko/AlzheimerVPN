@@ -280,9 +280,41 @@ if ! otool -l "$STAGE_APP/Contents/MacOS/AmneziaVPN" | awk '/cmd LC_RPATH/{getli
 fi
 QT_CORE_REFERENCE="$(otool -L "$STAGE_APP/Contents/MacOS/AmneziaVPN" | awk '/\/QtCore.framework\//{print $1; exit}')"
 install_name_tool -change "$QT_CORE_REFERENCE" '@rpath/QtCore.framework/Versions/A/QtCore' "$STAGE_APP/Contents/MacOS/AmneziaVPN"
+# macdeployqt copies ~160 MB of Qt frameworks, plugins and QML modules and takes
+# about ten minutes, but its output only depends on the Qt install, the libraries
+# the two executables link and the QML imports. Keep that output between builds
+# and let macdeployqt patch only the executables when nothing of that changed.
+DEPLOY_CACHE="${ALZHEIMERVPN_DEPLOY_CACHE:-$HOME/Library/Caches/alzheimervpn-build/deploy}"
+DEPLOY_PARTS=(Contents/Frameworks Contents/PlugIns Contents/Resources/qml)
+DEPLOY_KEY="$({
+  qtpaths --query QT_VERSION
+  for executable in AmneziaVPN "$FORK_SERVICE_NAME"; do
+    otool -L "$STAGE_APP/Contents/MacOS/$executable" | tail -n +2 | awk '{print $1}' | sort
+  done
+  (cd "$REPO_DIR/client/ui/qml" && find . -type f -print0 | sort -z | xargs -0 shasum)
+} | shasum | awk '{print $1}')"
+DEPLOY_OVERWRITE=(-always-overwrite)
+if [[ "$(cat "$DEPLOY_CACHE/key" 2>/dev/null)" == "$DEPLOY_KEY" ]]; then
+  echo "Deploy cache hit ($DEPLOY_KEY)."
+  for part in "${DEPLOY_PARTS[@]}"; do
+    mkdir -p "$STAGE_APP/$(dirname "$part")"
+    rm -rf "$STAGE_APP/$part"
+    cp -cR "$DEPLOY_CACHE/$part" "$STAGE_APP/$part"
+  done
+  DEPLOY_OVERWRITE=()
+fi
 "$QT_BIN_DIR/macdeployqt" "$STAGE_APP" \
   -executable="$STAGE_APP/Contents/MacOS/$FORK_SERVICE_NAME" \
-  -qmldir="$REPO_DIR/client/ui/qml" -libpath="$QT_LIB_DIR" -no-codesign -always-overwrite
+  -qmldir="$REPO_DIR/client/ui/qml" -libpath="$QT_LIB_DIR" -no-codesign ${DEPLOY_OVERWRITE[@]+"${DEPLOY_OVERWRITE[@]}"}
+if [[ ${#DEPLOY_OVERWRITE[@]} -gt 0 ]]; then
+  echo "Deploy cache miss; saving ($DEPLOY_KEY)."
+  rm -rf "$DEPLOY_CACHE"
+  for part in "${DEPLOY_PARTS[@]}"; do
+    mkdir -p "$DEPLOY_CACHE/$(dirname "$part")"
+    cp -cR "$STAGE_APP/$part" "$DEPLOY_CACHE/$part"
+  done
+  echo "$DEPLOY_KEY" >"$DEPLOY_CACHE/key"
+fi
 
 # macdeployqt can otherwise substitute Homebrew OpenSSL for the Conan build
 # used at link time. That mismatch is the source of the macOS 26.6 _deflate

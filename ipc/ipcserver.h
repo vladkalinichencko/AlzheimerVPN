@@ -39,6 +39,7 @@ public:
     virtual bool disableAllTraffic() override;
     virtual bool addKillSwitchAllowedRange(QStringList ranges) override;
     virtual bool resetKillSwitchAllowedRange(QStringList ranges) override;
+    virtual bool setAlwaysBlockedSites(QStringList ranges) override;
     virtual bool enablePeerTraffic(const QJsonObject &configStr) override;
     virtual bool enableKillSwitch(const QJsonObject &excludeAddr, int vpnAdapterIndex) override;
     virtual bool disableKillSwitch() override;

@@ -11,6 +11,7 @@ add_executable(split_tunneling
     "${REPO}/client/core/repositories/secureAppSettingsRepository.cpp"
     "${REPO}/client/core/controllers/ipSplitTunnelingController.cpp"
     "${REPO}/client/core/utils/splitTunnelRule.cpp"
+    "${REPO}/client/core/utils/splitTunnelRoutePlanner.cpp"
     "${REPO}/client/core/utils/routeModes.h"
     "${REPO}/client/core/utils/networkUtilities.cpp"
     "${REPO}/client/ui/models/ipSplitTunnelingModel.cpp")

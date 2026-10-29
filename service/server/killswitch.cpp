@@ -166,6 +166,8 @@ bool KillSwitch::disableKillSwitch() {
         MacOSFirewall::setAnchorEnabled(QStringLiteral("300.allowLAN"), false);
         MacOSFirewall::setAnchorEnabled(QStringLiteral("310.blockDNS"), false);
         MacOSFirewall::setAnchorEnabled(QStringLiteral("400.allowPIA"), false);
+    } else if (!m_alwaysBlockedSites.isEmpty()) {
+        applyAlwaysBlockedSites();
     } else {
         MacOSFirewall::uninstall();
     }
@@ -180,6 +182,55 @@ bool KillSwitch::disableKillSwitch() {
 
     m_allowedRanges.clear();
     return true;
+}
+
+// Sites that must never be reached outside the tunnel for as long as the app is running.
+// Only macOS enforces them; other platforms keep the list without acting on it.
+bool KillSwitch::setAlwaysBlockedSites(const QStringList &ranges)
+{
+    if (!std::all_of(ranges.cbegin(), ranges.cend(), isValidIpOrCidr)) {
+        qCritical() << "IPC: invalid IP/CIDR in ranges, rejecting setAlwaysBlockedSites";
+        return false;
+    }
+
+    const bool unchanged = ranges == m_alwaysBlockedSites;
+    m_alwaysBlockedSites = ranges;
+
+#ifdef Q_OS_MACOS
+    if (isStrictKillSwitchEnabled()) {
+        return true;
+    }
+    if (unchanged && (ranges.isEmpty() || MacOSFirewall::isAnchorEnabled(QStringLiteral("120.blockNets")))) {
+        return true;
+    }
+    // While a connection is protected its own rules stay in place; the list is applied when it ends.
+    return m_connectionProtection ? true : disableKillSwitch();
+#else
+    Q_UNUSED(unchanged);
+    return true;
+#endif
+}
+
+void KillSwitch::applyAlwaysBlockedSites()
+{
+#ifdef Q_OS_MACOS
+    if (!MacOSFirewall::isInstalled())
+        MacOSFirewall::install();
+
+    MacOSFirewall::ensureRootAnchorPriority();
+    MacOSFirewall::setAnchorEnabled(QStringLiteral("000.allowLoopback"), true);
+    MacOSFirewall::setAnchorEnabled(QStringLiteral("100.blockAll"), false);
+    MacOSFirewall::setAnchorEnabled(QStringLiteral("110.allowNets"), false);
+    MacOSFirewall::setAnchorEnabled(QStringLiteral("120.blockNets"), true);
+    MacOSFirewall::setAnchorTable(QStringLiteral("120.blockNets"), true, QStringLiteral("blocknets"), m_alwaysBlockedSites);
+    MacOSFirewall::setAnchorEnabled(QStringLiteral("200.allowVPN"), true);
+    MacOSFirewall::setAnchorEnabled(QStringLiteral("250.blockIPv6"), false);
+    MacOSFirewall::setAnchorEnabled(QStringLiteral("290.allowDHCP"), false);
+    MacOSFirewall::setAnchorEnabled(QStringLiteral("300.allowLAN"), false);
+    MacOSFirewall::setAnchorEnabled(QStringLiteral("310.blockDNS"), false);
+    MacOSFirewall::setAnchorEnabled(QStringLiteral("400.allowPIA"), false);
+    m_allowedRanges.clear();
+#endif
 }
 
 bool KillSwitch::disableAllTraffic() {

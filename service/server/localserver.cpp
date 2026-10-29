@@ -35,7 +35,15 @@ LocalServer::LocalServer(QObject *parent) : QObject(parent),
 
     QObject::connect(m_server.data(), &QLocalServer::newConnection, this, [this]() {
         qDebug() << "LocalServer new connection";
-        m_serverNode.addHostSideConnection(m_server->nextPendingConnection());
+        QLocalSocket *socket = m_server->nextPendingConnection();
+        ++m_clientCount;
+        // The always-blocked sites only hold while the app is alive, so a crash releases them too.
+        connect(socket, &QLocalSocket::disconnected, this, [this]() {
+            if (--m_clientCount == 0) {
+                KillSwitch::instance()->setAlwaysBlockedSites({});
+            }
+        });
+        m_serverNode.addHostSideConnection(socket);
 
         if (!m_isRemotingEnabled) {
             m_isRemotingEnabled = true;

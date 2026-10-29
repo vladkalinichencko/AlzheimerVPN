@@ -59,6 +59,7 @@ public slots:
     void reconnectToVpn();
     void disconnectFromVpn();
     void refreshSiteSplitTunnelRoutes();
+    void syncAlwaysBlockedSites();
 
     void onKillSwitchModeChanged(bool enabled);
     void setConnectionDiagnostic(ConnectionHealth health);

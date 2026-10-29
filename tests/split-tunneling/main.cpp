@@ -1,5 +1,6 @@
 #include <QtTest>
 #include "core/controllers/ipSplitTunnelingController.h"
+#include "core/utils/splitTunnelRoutePlanner.h"
 #include "ui/models/ipSplitTunnelingModel.h"
 
 using State = IpSplitTunnelingController::CheckState;
@@ -155,6 +156,21 @@ private slots:
         controller.removeSites();
         QVERIFY(controller.getCurrentSites().isEmpty());
         QCOMPARE(controller.siteCheck("empty.invalid").state, State::Unchecked);
+    }
+
+    void cachedSiteIpsCombineCacheAndSubnets()
+    {
+        const QVariantMap sites {
+            {"video.example", QStringList {"203.0.113.5", "203.0.113.6"}},
+            {"*.cdn.example", QStringList {"203.0.113.9"}},
+            {"198.51.100.4", QStringList {}},
+            {"203.0.113.5", QStringList {}},
+            {"not a host!", QStringList {"192.0.2.99"}},
+        };
+        QStringList ips = amnezia::SplitTunnelRoutePlanner::cachedSiteIps(sites);
+        ips.sort();
+        QCOMPARE(ips, (QStringList {"198.51.100.4", "203.0.113.5", "203.0.113.6", "203.0.113.9"}));
+        QVERIFY(amnezia::SplitTunnelRoutePlanner::cachedSiteIps({}).isEmpty());
     }
 };
 

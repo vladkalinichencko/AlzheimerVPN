@@ -38,6 +38,19 @@ AlzheimerVPN synchronizes bypass route IPs with the kill-switch allow-list. If a
 
 That avoids the broken middle state where a route points to the physical interface but traffic still gets blocked by VPN safety rules.
 
+### 🚫 Listed Sites Stay Blocked While The VPN Is Off
+
+The site list for "VPN only for listed sites" describes traffic that must never leave through the physical network. Upstream applies that protection only while the VPN is connecting or connected.
+
+On macOS, AlzheimerVPN keeps those sites blocked while the app is running, including when the VPN is off and whichever site split-tunneling mode is selected.
+
+- The block applies only when both the kill switch and site split tunneling are enabled and the "VPN only for listed sites" list is not empty.
+- It uses the saved addresses and fixed IP/subnet entries of that list, the same data the connected kill switch uses. It refreshes when the list or either switch changes and when the app starts.
+- Without the VPN, the service blocks only those addresses and still passes tunnel interfaces. It does not block DNS or IPv6, so the rest of the network keeps working.
+- During a connection, the usual kill-switch rules take over. When the connection ends, the service returns to the block.
+- The block ends when the app closes or loses its connection to the service. Strict kill switch mode already blocks everything and ignores the list.
+- Only IPv4 addresses are covered. Subnet masks are dropped as in site routes, and wildcard hostnames are blocked only through addresses already saved for them.
+
 ### 🩺 Diagnostics For Stuck Or Broken Connections
 
 Connection state is separated into two layers:
@@ -173,6 +186,11 @@ To build and verify without replacing the installed fork:
 ```bash
 ./scripts/build-and-install-alzheimervpn.sh --no-install
 ```
+
+The script keeps the output of `macdeployqt` (Qt frameworks, plugins, QML modules) in
+`~/Library/Caches/alzheimervpn-build/deploy`. The cache is reused while the Qt version,
+the libraries linked by the app and service, and the QML sources stay the same, which cuts
+a rebuild after a code change from about ten minutes to about two.
 
 The script stages `/private/tmp/AlzheimerVPN.app`, restores the Conan OpenSSL
 libraries after `macdeployqt`, verifies that every VPN executable is ARM64-only,

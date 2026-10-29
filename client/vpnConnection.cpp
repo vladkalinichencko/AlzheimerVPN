@@ -196,6 +196,7 @@ void VpnConnection::onBytesChanged(quint64 receivedBytes, quint64 sentBytes)
 
 void VpnConnection::onKillSwitchModeChanged(bool enabled)
 {
+    syncAlwaysBlockedSites();
 #ifdef AMNEZIA_DESKTOP
     IpcClient::withInterface([enabled](QSharedPointer<IpcInterfaceReplica> iface){
         QRemoteObjectPendingReply<bool> reply = iface->refreshKillSwitch(enabled);
@@ -451,6 +452,43 @@ void VpnConnection::setRepositories(SecureServersRepository* serversRepository, 
 {
     m_serversRepository = serversRepository;
     m_appSettingsRepository = appSettingsRepository;
+
+    if (m_appSettingsRepository) {
+        connect(m_appSettingsRepository, &SecureAppSettingsRepository::sitesChanged, this,
+                [this](amnezia::RouteMode mode) {
+                    if (mode == amnezia::RouteMode::VpnOnlyForwardSites) {
+                        syncAlwaysBlockedSites();
+                    }
+                });
+        connect(m_appSettingsRepository, &SecureAppSettingsRepository::sitesSplitTunnelingEnabledChanged, this,
+                [this]() { syncAlwaysBlockedSites(); });
+        QMetaObject::invokeMethod(this, &VpnConnection::syncAlwaysBlockedSites, Qt::QueuedConnection);
+    }
+}
+
+void VpnConnection::syncAlwaysBlockedSites()
+{
+#if defined(Q_OS_MACOS) && !defined(MACOS_NE)
+    if (!m_appSettingsRepository) {
+        return;
+    }
+
+    // Same condition and same site list as the "VPN only for listed sites" kill switch,
+    // but the service applies it while the VPN is off too.
+    QStringList blocked;
+    if (m_appSettingsRepository->isKillSwitchEnabled() && m_appSettingsRepository->isSitesSplitTunnelingEnabled()) {
+        blocked = SplitTunnelRoutePlanner::cachedSiteIps(
+            m_appSettingsRepository->vpnSites(amnezia::RouteMode::VpnOnlyForwardSites));
+    }
+    qInfo() << "VpnConnection::syncAlwaysBlockedSites blocked_ips=" << blocked.count();
+    IpcClient::withInterface([this, blocked](QSharedPointer<IpcInterfaceReplica> iface) {
+        IpcClient::async(this, iface->setAlwaysBlockedSites(blocked), [](bool ok) {
+            if (!ok) {
+                qWarning() << "VpnConnection::syncAlwaysBlockedSites: service rejected the blocked site list";
+            }
+        });
+    });
+#endif
 }
 
 void VpnConnection::addSitesRoutes(const QString &gw, amnezia::RouteMode mode)
