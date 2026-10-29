@@ -28,6 +28,9 @@ LocalServer::LocalServer(QObject *parent) : QObject(parent),
     m_server = QSharedPointer<QLocalServer>(new QLocalServer(this));
     m_server->setSocketOptions(QLocalServer::WorldAccessOption);
 
+    // A socket file left by a previous daemon makes listen() fail and leaves clients without a service.
+    QLocalServer::removeServer(amnezia::getIpcServiceUrl());
+
     if (!m_server->listen(amnezia::getIpcServiceUrl())) {
         qDebug() << QString("Unable to start the server: %1.").arg(m_server->errorString());
         return;
