@@ -41,6 +41,9 @@ public:
     bool isReplicaValid() const { return true; }
     TestReply<bool> xrayStart(const QString &) { return {true}; }
     TestReply<bool> xrayStop() { return {true}; }
+    TestReply<qint64> xrayStartOwned(const QString &) { return {1}; }
+    TestReply<bool> xrayStopOwned(qint64) { ++xrayStops; return {true}; }
+    int xrayStops = 0;
     TestReply<bool> deleteTun(const QString &) { return {true}; }
     TestReply<bool> createTun(const QString &, const QString &) {
         ++creates;

@@ -1,5 +1,6 @@
 #include "xrayProtocol.h"
 
+#include "core/models/protocols/xrayProtocolConfig.h"
 #include "core/protocols/protocolUtils.h"
 #include "core/utils/constants/configKeys.h"
 #include "core/utils/constants/protocolConstants.h"
@@ -167,6 +168,8 @@ XrayProtocol::~XrayProtocol()
 
 ErrorCode XrayProtocol::start()
 {
+    resetStopGuard();
+
     qDebug() << "XrayProtocol::start()";
     const QPointer<XrayProtocol> self(this);
     m_stopRequested = false;
@@ -191,22 +194,7 @@ ErrorCode XrayProtocol::start()
         return ErrorCode::XrayExecutableCrashed;
     }
 
-    // Fix fingerprint: old configs may contain "Mozilla/5.0" which xray-core rejects.
-    // Replace with the correct default at runtime so stale stored configs still work.
-    if (xrayConfigStr.contains("Mozilla/5.0", Qt::CaseInsensitive)) {
-        xrayConfigStr.replace("Mozilla/5.0", amnezia::protocols::xray::defaultFingerprint,
-                              Qt::CaseInsensitive);
-        qDebug() << "XrayProtocol: patched legacy fingerprint to"
-                 << amnezia::protocols::xray::defaultFingerprint;
-    }
-
-    // Fix inbound listen address: old configs may use "10.33.0.2" which doesn't exist
-    // until TUN is created. xray must listen on 127.0.0.1 so tun2socks can connect.
-    if (xrayConfigStr.contains(amnezia::protocols::xray::defaultLocalAddr)) {
-        xrayConfigStr.replace(amnezia::protocols::xray::defaultLocalAddr,
-                              amnezia::protocols::xray::defaultLocalListenAddr);
-        qDebug() << "XrayProtocol: patched legacy inbound listen address to 127.0.0.1";
-    }
+    xrayConfigStr = amnezia::sanitizeNativeConfig(xrayConfigStr);
 
     return IpcClient::withInterface(
             [&, self](QSharedPointer<IpcInterfaceReplica> iface) {
@@ -216,21 +204,22 @@ ErrorCode XrayProtocol::start()
                 // Note: the kill-switch hole for the VPN server IP is opened in
                 // VpnConnection::connectToVpn, before any protocol-specific start.
                 // This is the single business-logic entry for all protocols.
-                qInfo() << "XrayProtocol::start: invoking iface->xrayStart, config size="
+                qInfo() << "XrayProtocol::start: invoking iface->xrayStartOwned, config size="
                         << xrayConfigStr.size();
-                auto xrayStart = iface->xrayStart(xrayConfigStr);
+                auto xrayStart = iface->xrayStartOwned(xrayConfigStr);
                 const bool finished = xrayStart.waitForFinished();
                 if (!self || m_stopRequested) {
                     return ErrorCode::NoError;
                 }
-                const bool returned = finished ? xrayStart.returnValue() : false;
-                qInfo() << "XrayProtocol::start: xrayStart finished=" << finished
-                        << "returnValue=" << returned;
-                if (!finished || !returned) {
+                const qint64 token = finished ? xrayStart.returnValue() : 0;
+                qInfo() << "XrayProtocol::start: xrayStartOwned finished=" << finished
+                        << "token=" << token;
+                if (!finished || token == 0) {
                     qCritical() << "XrayProtocol::start: Failed to start xray (finished="
-                                << finished << ", returnValue=" << returned << ")";
+                                << finished << ", token=" << token << ")";
                     return ErrorCode::XrayExecutableCrashed;
                 }
+                m_xrayToken = token;
                 const ErrorCode tunResult = startTun2Socks();
                 qInfo() << "XrayProtocol::start: startTun2Socks returned" << static_cast<int>(tunResult);
                 return tunResult;
@@ -243,6 +232,10 @@ ErrorCode XrayProtocol::start()
 
 void XrayProtocol::stop()
 {
+    if (guardStop()) {
+        return;
+    }
+
     qDebug() << "XrayProtocol::stop()";
     if (m_stopRequested) {
         return;
@@ -251,6 +244,8 @@ void XrayProtocol::stop()
 
     QSharedPointer<IpcInterfaceReplica> iface = IpcClient::Interface();
     if (!iface.isNull() && iface->isReplicaValid()) {
+        const qint64 token = m_xrayToken;
+        m_xrayToken = 0;
         // Fire-and-forget. Each prior waitForFinished could spin the event loop
         // and dispatch a queued tun2socks::finished → stop() → recursion → hang.
         IpcClient::async(this, iface->disableKillSwitch(),
@@ -259,8 +254,9 @@ void XrayProtocol::stop()
             [](bool ok) { if (!ok) qWarning() << "Failed to start routing ipv6"; });
         IpcClient::async(this, iface->restoreResolvers(),
             [](bool ok) { if (!ok) qWarning() << "Failed to restore resolvers"; });
-        // The next start frees stale tun2socks before acquiring the same TUN.
-        IpcClient::async(this, iface->xrayStop(),
+        IpcClient::async(this, iface->deleteTun(tunName),
+            [](bool ok) { if (!ok) qWarning() << "Failed to delete tun"; });
+        IpcClient::async(this, iface->xrayStopOwned(token),
             [](bool ok) { if (!ok) qWarning() << "Failed to stop xray"; });
     }
 
@@ -347,7 +343,8 @@ ErrorCode XrayProtocol::startTun2Socks()
     connect(
             m_tun2socksProcess.data(), &IpcProcessInterfaceReplica::readyReadStandardError, this, 
             [this]() {
-                if (m_stopRequested || m_routingSetupStarted || sender() != m_tun2socksProcess.data()) {
+                if (!m_tun2socksProcess || m_stopRequested || m_routingSetupStarted
+                    || sender() != m_tun2socksProcess.data()) {
                     return;
                 }
                 const QPointer<XrayProtocol> self(this);

@@ -16,7 +16,13 @@ add_executable(split_tunneling
     "${REPO}/client/core/utils/networkUtilities.cpp"
     "${REPO}/client/ui/models/ipSplitTunnelingModel.cpp")
 target_include_directories(split_tunneling PRIVATE "${REPO}/client")
-target_compile_definitions(split_tunneling PRIVATE QTKEYCHAIN_NO_EXPORT DEV_AGW_ENDPOINT="http://127.0.0.1/")
+target_compile_definitions(split_tunneling PRIVATE QTKEYCHAIN_NO_EXPORT
+    PROD_AGW_PUBLIC_KEY_B64=""
+    PROD_S3_ENDPOINT="http://127.0.0.1/"
+    FALLBACK_S3_ENDPOINT=""
+    SANDBOX_AGW_PUBLIC_KEY_B64=""
+    SANDBOX_AGW_ENDPOINT="http://127.0.0.1/"
+    SANDBOX_S3_ENDPOINT="http://127.0.0.1/")
 target_link_libraries(split_tunneling PRIVATE Qt6::Test Qt6::Network Qt6::Core5Compat)
 enable_testing()
 add_test(NAME split_tunneling COMMAND split_tunneling)

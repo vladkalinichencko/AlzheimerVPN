@@ -4,14 +4,9 @@
 #include "core/utils/serverConfigUtils.h"
 #include "core/utils/constants/configKeys.h"
 #include <QDateTime>
-#include <QDebug>
-#include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
-#include <QTextStream>
-
-#include "version.h"
 
 #if defined(Q_OS_ANDROID)
     #include "platforms/android/android_controller.h"
@@ -25,6 +20,9 @@ namespace
 
     constexpr QLatin1String unprocessableSubscriptionMessage("Failed to retrieve subscription information. Is it activated?");
     constexpr QLatin1String trialAlreadyUsedMessage("trial subscription already used");
+    constexpr QLatin1String refreshCaptchaMessage("refresh_captcha");
+    constexpr QLatin1String invalidCaptchaMessage("invalid_captcha");
+    constexpr QLatin1String rateLimitExceededMessage("rate_limit_exceeded");
 
     QDateTime subscriptionEndUtcFromString(const QString &subscriptionEndDate)
     {
@@ -42,30 +40,6 @@ namespace
     {
         const QJsonValue value = jsonObj.value(QStringLiteral("message"));
         return value.isString() ? value.toString().trimmed() : QString();
-    }
-
-    void writeApiFailureLog(const QString &replyErrorString, const QNetworkReply::NetworkError &replyError, const int httpStatusCode,
-                            const QByteArray &responseBody)
-    {
-        QFile file(QStringLiteral("/tmp/%1-api.log").arg(QStringLiteral(APPLICATION_NAME)));
-        if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-            return;
-        }
-
-        QTextStream stream(&file);
-        stream << QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)
-               << " httpStatus=" << httpStatusCode
-               << " replyError=" << static_cast<int>(replyError)
-               << " replyErrorString=" << replyErrorString
-               << " response=" << QString::fromUtf8(responseBody.left(800)).simplified()
-               << Qt::endl;
-
-        qWarning().noquote()
-            << "AmneziaDiagnostic event=api_failure"
-            << "http_status=" + QString::number(httpStatusCode)
-            << "reply_error=" + QString::number(static_cast<int>(replyError))
-            << "reply_error_text=" + replyErrorString
-            << "response=" + QString::fromUtf8(responseBody.left(800)).simplified();
     }
 
     QString escapeUnicode(const QString &input)
@@ -140,9 +114,7 @@ bool apiUtils::isSubscriptionExpiringSoon(const QString &subscriptionEndDate, in
     return endDate <= nowUtc.addDays(withinDays);
 }
 
-amnezia::ErrorCode apiUtils::checkNetworkReplyErrors(const QList<QSslError> &sslErrors, const QString &replyErrorString,
-                                                     const QNetworkReply::NetworkError &replyError, const int httpStatusCode,
-                                                     const QByteArray &responseBody)
+amnezia::ErrorCode apiUtils::checkApiResponseErrors(const QByteArray &responseBody)
 {
     const int httpStatusCodeConflict = 409;
     const int httpStatusCodeNotFound = 404;
@@ -152,82 +124,60 @@ amnezia::ErrorCode apiUtils::checkNetworkReplyErrors(const QList<QSslError> &ssl
     const int httpStatusCodeRequestTimeout = 408;
     const int httpStatusCodeUnprocessableEntity = 422;
 
-    if (!sslErrors.empty()) {
-        qDebug().noquote() << sslErrors;
-        return amnezia::ErrorCode::ApiConfigSslError;
-    }
-    if (replyError == QNetworkReply::NetworkError::OperationCanceledError
-        || replyError == QNetworkReply::NetworkError::TimeoutError) {
-        qDebug() << replyError;
-        writeApiFailureLog(replyErrorString, replyError, httpStatusCode, responseBody);
-        return amnezia::ErrorCode::ApiConfigTimeoutError;
-    }
-    if (replyError == QNetworkReply::NetworkError::OperationNotImplementedError) {
-        qDebug() << replyError;
-        return amnezia::ErrorCode::ApiUpdateRequestError;
-    }
-
-    qDebug() << QString::fromUtf8(responseBody);
-    qDebug() << replyError;
-    qDebug() << httpStatusCode;
-    writeApiFailureLog(replyErrorString, replyError, httpStatusCode, responseBody);
-
     QJsonDocument jsonDoc = QJsonDocument::fromJson(responseBody);
-    if (jsonDoc.isObject()) {
-        QJsonObject jsonObj = jsonDoc.object();
-        const int httpStatusFromBody = jsonObj.value(QStringLiteral("http_status")).toInt(-1);
-
-        if (httpStatusFromBody == httpStatusCodeTooManyRequests) {
-            return amnezia::ErrorCode::ApiRateLimitError;
-        }
-        if (httpStatusFromBody == httpStatusCodeConflict) {
-            if (apiErrorMessageFromJson(jsonObj).contains(trialAlreadyUsedMessage, Qt::CaseInsensitive)) {
-                return amnezia::ErrorCode::ApiTrialAlreadyUsedError;
-            }
-            return amnezia::ErrorCode::ApiConfigLimitError;
-        }
-        if (httpStatusFromBody == httpStatusCodeNotFound) {
-            return amnezia::ErrorCode::ApiNotFoundError;
-        }
-        if (httpStatusFromBody == httpStatusCodeRequestTimeout) {
-            return amnezia::ErrorCode::ApiConfigTimeoutError;
-        }
-        if (httpStatusFromBody == httpStatusCodeNotImplemented) {
-            return amnezia::ErrorCode::ApiUpdateRequestError;
-        }
-        if (httpStatusFromBody == httpStatusCodeUnprocessableEntity) {
-            if (apiErrorMessageFromJson(jsonObj) == unprocessableSubscriptionMessage) {
-                return amnezia::ErrorCode::ApiSubscriptionExpiredError;
-            }
-            return amnezia::ErrorCode::ApiConfigDownloadError;
-        }
-        if (httpStatusFromBody == httpStatusCodePaymentRequired) {
-            const QString message = apiErrorMessageFromJson(jsonObj);
-            if (message.contains(QLatin1String("refresh_captcha"), Qt::CaseInsensitive)) {
-                return amnezia::ErrorCode::ApiCaptchaRefreshError;
-            }
-            if (message.contains(QLatin1String("invalid_captcha"), Qt::CaseInsensitive)) {
-                return amnezia::ErrorCode::ApiCaptchaInvalidError;
-            }
-            if (jsonObj.contains(QStringLiteral("captcha_id")) || jsonObj.contains(QStringLiteral("captcha_image"))
-                || message.compare(QLatin1String("rate_limit_exceeded"), Qt::CaseInsensitive) == 0
-                || message.contains(QLatin1String("rate_limit_exceeded"), Qt::CaseInsensitive)) {
-                return amnezia::ErrorCode::ApiCaptchaRequiredError;
-            }
-            return amnezia::ErrorCode::ApiSubscriptionNotActiveError;
-        }
-
-        if (httpStatusFromBody >= 300) {
-            return amnezia::ErrorCode::ApiConfigDownloadError;
-        }
-    }
-
-    if (replyError == QNetworkReply::NoError) {
+    if (!jsonDoc.isObject()) {
         return amnezia::ErrorCode::NoError;
     }
 
-    qDebug() << "something went wrong";
-    return amnezia::ErrorCode::ApiConfigDownloadError;
+    QJsonObject jsonObj = jsonDoc.object();
+    const int httpStatusFromBody = jsonObj.value(apiDefs::key::httpStatus).toInt(-1);
+    if (httpStatusFromBody < 0) {
+        return amnezia::ErrorCode::NoError;
+    }
+
+    if (httpStatusFromBody == httpStatusCodeTooManyRequests) {
+        return amnezia::ErrorCode::ApiRateLimitError;
+    }
+    if (httpStatusFromBody == httpStatusCodeConflict) {
+        if (apiErrorMessageFromJson(jsonObj).contains(trialAlreadyUsedMessage, Qt::CaseInsensitive)) {
+            return amnezia::ErrorCode::ApiTrialAlreadyUsedError;
+        }
+        return amnezia::ErrorCode::ApiConfigLimitError;
+    }
+    if (httpStatusFromBody == httpStatusCodeNotFound) {
+        return amnezia::ErrorCode::ApiNotFoundError;
+    }
+    if (httpStatusFromBody == httpStatusCodeRequestTimeout) {
+        return amnezia::ErrorCode::ApiConfigTimeoutError;
+    }
+    if (httpStatusFromBody == httpStatusCodeNotImplemented) {
+        return amnezia::ErrorCode::ApiUpdateRequestError;
+    }
+    if (httpStatusFromBody == httpStatusCodeUnprocessableEntity) {
+        if (apiErrorMessageFromJson(jsonObj) == unprocessableSubscriptionMessage) {
+            return amnezia::ErrorCode::ApiSubscriptionExpiredError;
+        }
+        return amnezia::ErrorCode::ApiConfigDownloadError;
+    }
+    if (httpStatusFromBody == httpStatusCodePaymentRequired) {
+        const QString message = apiErrorMessageFromJson(jsonObj);
+        if (message.contains(refreshCaptchaMessage, Qt::CaseInsensitive)) {
+            return amnezia::ErrorCode::ApiCaptchaRefreshError;
+        }
+        if (message.contains(invalidCaptchaMessage, Qt::CaseInsensitive)) {
+            return amnezia::ErrorCode::ApiCaptchaInvalidError;
+        }
+        if (jsonObj.contains(apiDefs::key::captchaId) || jsonObj.contains(apiDefs::key::captchaImage)
+            || message.contains(rateLimitExceededMessage, Qt::CaseInsensitive)) {
+            return amnezia::ErrorCode::ApiCaptchaRequiredError;
+        }
+        return amnezia::ErrorCode::ApiSubscriptionNotActiveError;
+    }
+
+    if (httpStatusFromBody >= 300) {
+        return amnezia::ErrorCode::ApiConfigDownloadError;
+    }
+    return amnezia::ErrorCode::NoError;
 }
 
 bool apiUtils::isPremiumServer(const QJsonObject &serverConfigObject)

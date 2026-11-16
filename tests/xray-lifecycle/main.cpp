@@ -4,6 +4,10 @@
 #include "core/utils/networkUtilities.h"
 #include "core/utils/serialization/serialization.h"
 
+namespace amnezia {
+QString sanitizeNativeConfig(const QString &nativeConfig);
+}
+
 VpnProtocol::VpnProtocol(const QJsonObject &config, QObject *parent)
     : QObject(parent), m_connectionState(Vpn::Unknown), m_rawConfig(config),
       m_timeoutTimer(nullptr), m_lastError(ErrorCode::NoError), m_receivedBytes(0), m_sentBytes(0) {}
@@ -15,11 +19,20 @@ void VpnProtocol::setConnectionState(Vpn::ConnectionState state) {
     m_connectionState = state;
     emit connectionStateChanged(state);
 }
+bool VpnProtocol::guardStop() {
+    if (m_stopped) {
+        return true;
+    }
+    m_stopped = true;
+    return false;
+}
+void VpnProtocol::resetStopGuard() { m_stopped = false; }
 void VpnProtocol::setLastError(ErrorCode error) { m_lastError = error; }
 Vpn::ConnectionState VpnProtocol::connectionState() const { return m_connectionState; }
 QString amnezia::ProtocolUtils::key_proto_config_data(Proto) { return "xray"; }
 amnezia::serialization::inbounds::InboundCredentials
 amnezia::serialization::inbounds::EnsureInboundAuth(QJsonObject &) { return {"test", "test", 1080}; }
+QString amnezia::sanitizeNativeConfig(const QString &nativeConfig) { return nativeConfig; }
 
 class XrayLifecycleTest : public QObject {
     Q_OBJECT

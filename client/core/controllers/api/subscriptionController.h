@@ -47,10 +47,12 @@ public:
     ErrorCode importTrialFromGateway(const QString &userCountryCode, const QString &serviceType,
                                      const QString &serviceProtocol, const QString &email);
 
-    ErrorCode updateServiceFromGateway(const QString &serverId, const QString &newCountryCode, bool isConnectEvent,
+    ErrorCode fetchServiceConfig(const QString &serverId, const QString &serviceProtocol, QJsonObject &serverConfigJson);
+
+    ErrorCode updateServiceFromGateway(const QString &serverId, const QString &serverCountryCode, bool isConnectEvent,
                                        CaptchaInfo *captchaInfoOut = nullptr, ProtocolData *usedProtocolDataOut = nullptr);
 
-    ErrorCode resolveUpdateServiceCaptcha(const QString &serverId, const QString &newCountryCode, bool isConnectEvent,
+    ErrorCode resolveUpdateServiceCaptcha(const QString &serverId, const QString &serverCountryCode, bool isConnectEvent,
                                           const ProtocolData &protocolData, const QString &captchaId,
                                           const QString &captchaSolution, CaptchaInfo *retryCaptchaOut = nullptr);
 
@@ -89,6 +91,21 @@ public:
                                           const QString &captchaId, const QString &captchaSolution,
                                           CaptchaInfo *retryCaptchaOut = nullptr);
 
+#ifdef AMNEZIA_BUILD_TESTS
+    // Exposes the gateway response parsing path without performing a network request.
+    ErrorCode applyImportedServiceConfigForTest(const QString &userCountryCode, const QString &serviceType,
+                                                const QString &serviceProtocol, const ProtocolData &protocolData,
+                                                const QByteArray &responseBody)
+    {
+        return applyImportedServiceConfig(userCountryCode, serviceType, serviceProtocol, protocolData, responseBody);
+    }
+    ErrorCode applyUpdatedServiceConfigForTest(const QString &serverId, const QString &serviceProtocol,
+                                               const ProtocolData &protocolData, const QByteArray &responseBody)
+    {
+        return applyUpdatedServiceConfig(serverId, serviceProtocol, protocolData, responseBody);
+    }
+#endif
+
 private:
     ErrorCode executeRequest(const QString &endpoint, const QJsonObject &apiPayload, QByteArray &responseBody, bool isTestPurchase = false,
                           int overallDeadlineMsecs = 0);
@@ -102,7 +119,7 @@ private:
         ProtocolData protocolData;
         bool isTestPurchase = false;
     };
-    ErrorCode prepareUpdateRequest(const QString &serverId, const QString &newCountryCode, bool isConnectEvent, UpdateRequest &request);
+    ErrorCode prepareUpdateRequest(const QString &serverId, const QString &serverCountryCode, bool isConnectEvent, UpdateRequest &request);
     ErrorCode finishUpdateRequest(const QString &serverId, bool isConnectEvent, const UpdateRequest &request, ErrorCode errorCode,
                                   const QByteArray &responseBody, CaptchaInfo *captchaInfoOut, ProtocolData *usedProtocolDataOut);
     bool isApiKeyExpired(const QString &serverId) const;

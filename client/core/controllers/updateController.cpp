@@ -13,6 +13,7 @@
 #include "core/controllers/gatewayController.h"
 #include "core/utils/api/gatewayPayloadBuilder.h"
 #include "core/utils/appUiConfig.h"
+#include "core/utils/constants/apiConstants.h"
 #include "core/utils/constants/apiKeys.h"
 #include "core/utils/selfhosted/scriptsRegistry.h"
 
@@ -138,11 +139,9 @@ void UpdateController::checkForUpdates()
     }
     setUpdateCheckRunning(true);
 
-    auto gatewayController = QSharedPointer<GatewayController>::create(m_appSettingsRepository->getGatewayEndpoint(),
-                                                                       m_appSettingsRepository->isDevGatewayEnv(),
-                                                                       7000,
-                                                                       m_appSettingsRepository->isStrictKillSwitchEnabled(),
-                                                                       m_appSettingsRepository);
+    auto gatewayController = QSharedPointer<GatewayController>::create(
+            m_appSettingsRepository->gatewayEnvironment(), apiDefs::requestTimeoutMsecs,
+            m_appSettingsRepository->isStrictKillSwitchEnabled(), m_appSettingsRepository);
 
     QJsonObject apiPayload = GatewayPayloadBuilder(m_appSettingsRepository).build();
 

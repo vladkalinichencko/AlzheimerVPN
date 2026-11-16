@@ -69,6 +69,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     var protoType: TunnelProtoType?
     
     var activeIfaceIdx: UInt32 = 0
+    let hevSocksTunnelGroup = DispatchGroup()
 
     func openVPNPacketFlow() -> OpenVPNAdapterPacketFlow {
         openVPNPacketFlowAdapter
@@ -159,21 +160,20 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
           return
       }
 
-      guard let message = String(data: messageData, encoding: .utf8) else {
+      guard String(data: messageData, encoding: .utf8) != nil else {
           if let completionHandler {
               completionHandler(nil)
           }
           return
       }
 
-      neLog(.info, title: "App said: ", message: message)
-
       guard let message = try? JSONSerialization.jsonObject(with: messageData, options: []) as? [String: Any] else {
           if protoType == .wireguard {
+              neLog(.info, title: "App said: ", message: "non-JSON message, \(messageData.count) bytes")
               handleWireguardAppMessage(messageData, completionHandler: completionHandler)
               return
           }
-          neLog(.error, message: "Failed to serialize message from app")
+          neLog(.error, message: "Failed to serialize message from app, \(messageData.count) bytes")
           return
       }
 
@@ -186,6 +186,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
           neLog(.error, message: "Missing action key in app message")
           completionHandler(nil)
           return
+      }
+
+      if action != Constants.kActionStatus {
+          neLog(.info, title: "App said: ", message: "action=\(action)")
       }
 
       if action == Constants.kActionStatus {
@@ -215,8 +219,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             let providerKeys = providerConfiguration?.keys.sorted().joined(separator: ",") ?? ""
             var protocolDetails = "bundleId=\(protocolConfiguration.providerBundleIdentifier ?? "") keys=[\(providerKeys)]"
             if let ovpnData = providerConfiguration?[Constants.ovpnConfigKey] as? Data {
-                let preview = String(decoding: ovpnData.prefix(512), as: UTF8.self)
-                protocolDetails += " ovpnBytes=\(ovpnData.count) ovpnPreview=\(preview)"
+                protocolDetails += " ovpnBytes=\(ovpnData.count)"
             }
             neLog(.info, title: "Protocol", message: protocolDetails)
 
@@ -230,6 +233,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
 
         guard let protoType else {
+            neLog(.error, message: "Protocol is not selected")
             let error = NSError(domain: "Protocol is not selected", code: 0)
             completionHandler(error)
             return
@@ -259,6 +263,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         cancelPendingNetworkChangeHandling()
 
         guard let protoType else {
+            neLog(.info, message: "Stopping tunnel without protocol: reason: \(reason.amneziaDescription)")
             completionHandler()
             return
         }
@@ -271,6 +276,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             stopOpenVPN(with: reason,
                         completionHandler: completionHandler)
         case .xray:
+            xrayLog(.info, message: "Stopping tunnel: reason: \(reason.amneziaDescription)")
             stopXray(completionHandler: completionHandler)
         }
     }
@@ -311,10 +317,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         updateActiveInterfaceIndex(for: changePath)
         reasserting = true
         xrayLog(.info, message: "Applying network change to xray tunnel")
-        stopXray { }
-        startXray { [weak self] error in
-            self?.reasserting = false
-            completion(error)
+        stopXray { [weak self] in
+            self?.startXray { [weak self] error in
+                self?.reasserting = false
+                completion(error)
+            }
         }
     }
 

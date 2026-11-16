@@ -72,6 +72,10 @@ extract_original_string() {
   printf '%s' "$value"
 }
 
+cache_value() {
+  sed -n "s/^$1:[^=]*=//p" "$BUILD_DIR/CMakeCache.txt" | head -1
+}
+
 # --- Uninstall fast path: bootout daemon, remove plist + app bundle. ---
 if [[ $DO_UNINSTALL -eq 1 ]]; then
   step "Uninstall AlzheimerVPN fork"
@@ -110,41 +114,39 @@ if [[ ! -s "$KEY1" || ! -s "$KEY2" ]]; then
 fi
 [[ -s "$KEY1" && -s "$KEY2" ]] || { echo "Failed to extract two PEM blocks." >&2; exit 1; }
 
-# Encode each .pem block as a single-line string with literal `\n` between
-# lines and NO trailing `\n`. The original Amnezia binary's macro string is
-# a C string literal without a trailing newline, so SHA512(PROD_AGW_PUBLIC_KEY)
-# differs if we append one — and that hash drives AES-decrypt of the S3 proxy
-# fallback list (and indirectly the gateway crypto handshake). Empirically
-# verified against a captured S3 response: only the no-trailing-newline form
-# yields printable JSON. See gatewayController.cpp::getProxyUrlsAsync.
-escape_pem() {
-  awk 'BEGIN{first=1} {if(!first) printf "\\n"; printf "%s", $0; first=0}' "$1"
+# libagw receives PEM text after base64-decoding the *_B64 macros. Encode the
+# extracted PEM blocks as single-line base64; PEM parsers accept the trailing
+# newline, and the old SHA512/AES proxy-list path now lives inside libagw.
+pem_to_b64() {
+  base64 < "$1" | tr -d '\n'
 }
-escape_pem "$KEY1" > "$KEY1_ESC"
-escape_pem "$KEY2" > "$KEY2_ESC"
 
-# PROD/DEV assignment. The order in `strings -a` is layout-dependent and was
+# PROD/SANDBOX assignment. The order in `strings -a` is layout-dependent and was
 # the opposite of what we initially assumed: experimentally, block #2 is the
 # real PROD (its SHA512-derived AES key successfully decrypts the captured S3
 # proxy list payload from the gateway). Set AGW_KEY_SWAP=1 to flip if a future
 # original-binary update changes this layout again.
 if [[ "${AGW_KEY_SWAP:-0}" == "1" ]]; then
-  PROD_AGW_PUBLIC_KEY="$(cat "$KEY1_ESC")"
-  DEV_AGW_PUBLIC_KEY="$(cat "$KEY2_ESC")"
-  echo "  AGW_KEY_SWAP=1: PROD<-block1, DEV<-block2"
+  PROD_KEY_PEM="$KEY1"
+  SANDBOX_KEY_PEM="$KEY2"
+  echo "  AGW_KEY_SWAP=1: PROD<-block1, SANDBOX<-block2"
 else
-  PROD_AGW_PUBLIC_KEY="$(cat "$KEY2_ESC")"
-  DEV_AGW_PUBLIC_KEY="$(cat "$KEY1_ESC")"
+  PROD_KEY_PEM="$KEY2"
+  SANDBOX_KEY_PEM="$KEY1"
 fi
-DEV_AGW_ENDPOINT="http://gw.amnezia.org:80/"
-DEV_S3_ENDPOINT="${DEV_S3_ENDPOINT:-$(extract_original_string '/^https:\/\/s3\.eu-north-1\.amazonaws\.com\/amnezia-dev\/$/ { print; exit }')}"
+PROD_AGW_PUBLIC_KEY_B64="${PROD_AGW_PUBLIC_KEY_B64:-$(pem_to_b64 "$PROD_KEY_PEM")}"
+SANDBOX_AGW_PUBLIC_KEY_B64="${SANDBOX_AGW_PUBLIC_KEY_B64:-$(pem_to_b64 "$SANDBOX_KEY_PEM")}"
+SANDBOX_AGW_ENDPOINT="${SANDBOX_AGW_ENDPOINT:-http://gw.dev.amzsvc.com:80/}"
+SANDBOX_S3_ENDPOINT="${SANDBOX_S3_ENDPOINT:-$(extract_original_string '/^https:\/\/s3\.eu-north-1\.amazonaws\.com\/amnezia-dev\/$/ { print; exit }')}"
 PROD_S3_ENDPOINT="${PROD_S3_ENDPOINT:-$(extract_original_string '/^https:\/\/s3\.eu-north-1\.amazonaws\.com\/amnezia\/, / { print; exit }')}"
-FALLBACK_S3_ENDPOINT="${FALLBACK_S3_ENDPOINT:-}"
+FALLBACK_S3_ENDPOINT="${FALLBACK_S3_ENDPOINT:-$(extract_original_string '/^https:\/\/storage\.mwsapis\.ru\/lambda-list\/, / { print; exit }')}"
+FREE_V2_ENDPOINT="${FREE_V2_ENDPOINT:-13.248.139.44}"
+PREM_V1_ENDPOINT="${PREM_V1_ENDPOINT:-52.223.54.40}"
 
-[[ ${#PROD_AGW_PUBLIC_KEY} -gt 400 ]] || { echo "PROD key too short" >&2; exit 1; }
-[[ ${#DEV_AGW_PUBLIC_KEY}  -gt 400 ]] || { echo "DEV key too short"  >&2; exit 1; }
+[[ ${#PROD_AGW_PUBLIC_KEY_B64} -gt 400 ]] || { echo "PROD key too short" >&2; exit 1; }
+[[ ${#SANDBOX_AGW_PUBLIC_KEY_B64} -gt 400 ]] || { echo "SANDBOX key too short" >&2; exit 1; }
 [[ -n "$PROD_S3_ENDPOINT" ]] || { echo "Failed to extract production S3 endpoints from original Amnezia binary." >&2; exit 1; }
-[[ -n "$DEV_S3_ENDPOINT" ]] || { echo "Failed to extract development S3 endpoint from original Amnezia binary." >&2; exit 1; }
+[[ -n "$SANDBOX_S3_ENDPOINT" ]] || { echo "Failed to extract sandbox S3 endpoint from original Amnezia binary." >&2; exit 1; }
 
 # --- 2. Conan wrapper (the project's CMake invokes `conan` on PATH). ---
 step "Conan wrapper"
@@ -170,8 +172,14 @@ elif [[ ! -f "$BUILD_DIR/CMakeCache.txt" ]]; then
   NEEDS_CONFIGURE=1
 else
   NEEDS_CONFIGURE=0
-  CACHED_PROD_LEN=$(awk -F= '/^PROD_AGW_PUBLIC_KEY:/{print length($2)}' "$BUILD_DIR/CMakeCache.txt")
-  CACHED_DEV_LEN=$(awk -F= '/^DEV_AGW_PUBLIC_KEY:/{print length($2)}'  "$BUILD_DIR/CMakeCache.txt")
+  CACHED_PROD_B64=$(cache_value PROD_AGW_PUBLIC_KEY_B64)
+  CACHED_SANDBOX_B64=$(cache_value SANDBOX_AGW_PUBLIC_KEY_B64)
+  CACHED_PROD_S3=$(cache_value PROD_S3_ENDPOINT)
+  CACHED_FALLBACK_S3=$(cache_value FALLBACK_S3_ENDPOINT)
+  CACHED_SANDBOX_AGW=$(cache_value SANDBOX_AGW_ENDPOINT)
+  CACHED_SANDBOX_S3=$(cache_value SANDBOX_S3_ENDPOINT)
+  CACHED_FREE_V2=$(cache_value FREE_V2_ENDPOINT)
+  CACHED_PREM_V1=$(cache_value PREM_V1_ENDPOINT)
 CACHED_SERVICE=$(awk -F= '/^AMNEZIA_SERVICE_NAME:/{print $2}' "$BUILD_DIR/CMakeCache.txt")
 CACHED_KEYCHAIN=$(awk -F= '/^AMNEZIA_KEYCHAIN_NAME:/{print $2}' "$BUILD_DIR/CMakeCache.txt")
 CACHED_APP_NAME=$(awk -F= '/^AMNEZIA_APPLICATION_NAME:/{print $2}' "$BUILD_DIR/CMakeCache.txt")
@@ -185,10 +193,15 @@ CACHED_RUN_DIR=$(awk -F= '/^AMNEZIA_DAEMON_RUN_DIR:/{print $2}' "$BUILD_DIR/CMak
 CACHED_WG_DIR=$(awk -F= '/^AMNEZIA_WG_RUNTIME_DIR:/{print $2}' "$BUILD_DIR/CMakeCache.txt")
 CACHED_TMP_SOCKET=$(awk -F= '/^AMNEZIA_DAEMON_TMP_SOCKET:/{print $2}' "$BUILD_DIR/CMakeCache.txt")
 CACHED_XRAY_TUN=$(awk -F= '/^AMNEZIA_XRAY_TUN_NAME:/{print $2}' "$BUILD_DIR/CMakeCache.txt")
-  CACHED_PROD_S3=$(awk -F= '/^PROD_S3_ENDPOINT:/{print $2}' "$BUILD_DIR/CMakeCache.txt")
-  CACHED_DEV_S3=$(awk -F= '/^DEV_S3_ENDPOINT:/{print $2}' "$BUILD_DIR/CMakeCache.txt")
-  if [[ -z "${CACHED_PROD_LEN:-}" || -z "${CACHED_DEV_LEN:-}" \
-        || $CACHED_PROD_LEN -lt 400 || $CACHED_DEV_LEN -lt 400 \
+  if [[ -z "${CACHED_PROD_B64:-}" || -z "${CACHED_SANDBOX_B64:-}" \
+        || "$CACHED_PROD_B64" != "$PROD_AGW_PUBLIC_KEY_B64" \
+        || "$CACHED_SANDBOX_B64" != "$SANDBOX_AGW_PUBLIC_KEY_B64" \
+        || "$CACHED_PROD_S3" != "$PROD_S3_ENDPOINT" \
+        || "$CACHED_FALLBACK_S3" != "$FALLBACK_S3_ENDPOINT" \
+        || "$CACHED_SANDBOX_AGW" != "$SANDBOX_AGW_ENDPOINT" \
+        || "$CACHED_SANDBOX_S3" != "$SANDBOX_S3_ENDPOINT" \
+        || "$CACHED_FREE_V2" != "$FREE_V2_ENDPOINT" \
+        || "$CACHED_PREM_V1" != "$PREM_V1_ENDPOINT" \
         || "$CACHED_SERVICE" != "$FORK_SERVICE_NAME" \
         || "$CACHED_KEYCHAIN" != "$FORK_KEYCHAIN_NAME" \
         || "$CACHED_APP_NAME" != "AmneziaVPN" \
@@ -201,9 +214,7 @@ CACHED_XRAY_TUN=$(awk -F= '/^AMNEZIA_XRAY_TUN_NAME:/{print $2}' "$BUILD_DIR/CMak
         || "$CACHED_RUN_DIR" != "$FORK_DAEMON_RUN_DIR" \
         || "$CACHED_WG_DIR" != "$FORK_WG_RUNTIME_DIR" \
         || "$CACHED_TMP_SOCKET" != "$FORK_DAEMON_TMP_SOCKET" \
-        || "$CACHED_XRAY_TUN" != "$FORK_XRAY_TUN_NAME" \
-        || -z "$CACHED_PROD_S3" \
-        || -z "$CACHED_DEV_S3" ]]; then
+        || "$CACHED_XRAY_TUN" != "$FORK_XRAY_TUN_NAME" ]]; then
     NEEDS_CONFIGURE=1
   fi
 fi
@@ -232,17 +243,19 @@ if [[ $NEEDS_CONFIGURE -eq 1 ]]; then
     -DAMNEZIA_WG_RUNTIME_DIR="$FORK_WG_RUNTIME_DIR" \
     -DAMNEZIA_DAEMON_TMP_SOCKET="$FORK_DAEMON_TMP_SOCKET" \
     -DAMNEZIA_XRAY_TUN_NAME="$FORK_XRAY_TUN_NAME" \
-    -DPROD_AGW_PUBLIC_KEY="$PROD_AGW_PUBLIC_KEY" \
+    -DPROD_AGW_PUBLIC_KEY_B64="$PROD_AGW_PUBLIC_KEY_B64" \
     -DPROD_S3_ENDPOINT="$PROD_S3_ENDPOINT" \
     -DFALLBACK_S3_ENDPOINT="$FALLBACK_S3_ENDPOINT" \
-    -DDEV_AGW_PUBLIC_KEY="$DEV_AGW_PUBLIC_KEY" \
-    -DDEV_AGW_ENDPOINT="$DEV_AGW_ENDPOINT" \
-    -DDEV_S3_ENDPOINT="$DEV_S3_ENDPOINT"
+    -DSANDBOX_AGW_PUBLIC_KEY_B64="$SANDBOX_AGW_PUBLIC_KEY_B64" \
+    -DSANDBOX_AGW_ENDPOINT="$SANDBOX_AGW_ENDPOINT" \
+    -DSANDBOX_S3_ENDPOINT="$SANDBOX_S3_ENDPOINT" \
+    -DFREE_V2_ENDPOINT="$FREE_V2_ENDPOINT" \
+    -DPREM_V1_ENDPOINT="$PREM_V1_ENDPOINT"
 else
   echo "Cache OK, skipping reconfigure (use --reconfigure to force)."
 fi
 
-awk -F= '/^(PROD_AGW_PUBLIC_KEY|DEV_AGW_PUBLIC_KEY|PROD_S3_ENDPOINT|FALLBACK_S3_ENDPOINT|DEV_AGW_ENDPOINT|DEV_S3_ENDPOINT|AMNEZIA_BUNDLE_NAME|AMNEZIA_APPLICATION_NAME|AMNEZIA_ORGANIZATION_NAME|AMNEZIA_SERVICE_NAME|AMNEZIA_KEYCHAIN_NAME|AMNEZIA_IPC_SERVICE_URL|AMNEZIA_DAEMON_RUN_DIR|AMNEZIA_WG_RUNTIME_DIR|AMNEZIA_DAEMON_TMP_SOCKET|AMNEZIA_XRAY_TUN_NAME|CLIENT_APPLICATION_NAME|CLIENT_ORGANIZATION_NAME|CLIENT_SERVICE_NAME|CLIENT_KEYCHAIN_NAME|CLIENT_APP_INSTANCE_NAME):/ { split($1,a,":"); print a[1] "=" (length($2) > 60 ? "length=" length($2) : $2) }' "$BUILD_DIR/CMakeCache.txt"
+awk -F= '/^(PROD_AGW_PUBLIC_KEY_B64|SANDBOX_AGW_PUBLIC_KEY_B64|PROD_S3_ENDPOINT|FALLBACK_S3_ENDPOINT|SANDBOX_AGW_ENDPOINT|SANDBOX_S3_ENDPOINT|FREE_V2_ENDPOINT|PREM_V1_ENDPOINT|AMNEZIA_BUNDLE_NAME|AMNEZIA_APPLICATION_NAME|AMNEZIA_ORGANIZATION_NAME|AMNEZIA_SERVICE_NAME|AMNEZIA_KEYCHAIN_NAME|AMNEZIA_IPC_SERVICE_URL|AMNEZIA_DAEMON_RUN_DIR|AMNEZIA_WG_RUNTIME_DIR|AMNEZIA_DAEMON_TMP_SOCKET|AMNEZIA_XRAY_TUN_NAME|CLIENT_APPLICATION_NAME|CLIENT_ORGANIZATION_NAME|CLIENT_SERVICE_NAME|CLIENT_KEYCHAIN_NAME|CLIENT_APP_INSTANCE_NAME):/ { split($1,a,":"); print a[1] "=" (length($2) > 60 ? "length=" length($2) : $2) }' "$BUILD_DIR/CMakeCache.txt"
 
 # --- 4. Build.
 step "Build"

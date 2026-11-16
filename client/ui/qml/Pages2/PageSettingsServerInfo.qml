@@ -21,13 +21,30 @@ PageType {
     readonly property int pageSettingsServerServices: 1
     readonly property int pageSettingsServerData: 2
 
+    readonly property var tabTitles: [qsTr("Protocols"), qsTr("Services"), qsTr("Management")]
+    readonly property var availableTabs: {
+        const tabs = []
+        if (protocolsPage.installedProtocolsCount > 0) {
+            tabs.push(root.pageSettingsServerProtocols)
+        }
+        if (servicesPage.installedServicesCount > 0) {
+            tabs.push(root.pageSettingsServerServices)
+        }
+        tabs.push(root.pageSettingsServerData)
+        return tabs
+    }
+
+    property int currentTab: (ServersUiController.isServerFromApi(ServersUiController.processedServerId)
+                              && !ServersUiController.serverHasInstalledContainers(ServersUiController.processedServerId)) ?
+                                 root.pageSettingsServerData : root.pageSettingsServerProtocols
+
     property var processedServer
 
     Connections {
         target: PageController
 
         function onGoToPageSettingsServerServices() {
-            tabBar.setCurrentIndex(root.pageSettingsServerServices)
+            root.currentTab = root.pageSettingsServerServices
         }
     }
 
@@ -49,7 +66,6 @@ PageType {
 
     SortFilterProxyModel {
         id: proxyServersModel
-        objectName: "proxyServersModel"
 
         sourceModel: ServersModel
         filters: [
@@ -65,31 +81,17 @@ PageType {
     }
 
     ColumnLayout {
-        objectName: "mainLayout"
-
         anchors.fill: parent
-        anchors.topMargin: 20 + PageController.safeAreaTopMargin
 
-        spacing: 4
+        spacing: 0
 
-        BackButtonType {
-            id: backButton
-            objectName: "backButton"
-        }
-
-        HeaderTypeWithButton {
+        NavigationBarType {
             id: headerContent
-            objectName: "headerContent"
 
             Layout.fillWidth: true
-            Layout.leftMargin: 16
-            Layout.rightMargin: 16
-            Layout.bottomMargin: 10
 
-            actionButtonImage: "qrc:/images/controls/edit-3.svg"
-
-            headerText: root.processedServer != null ? root.processedServer.name : ""
-            descriptionText: {
+            title: root.processedServer != null ? root.processedServer.name : ""
+            description: {
                 if (root.processedServer == null) {
                     return ""
                 }
@@ -102,8 +104,12 @@ PageType {
                 }
             }
 
-            actionButtonFunction: function() {
-                serverNameEditDrawer.openTriggered()
+            IconButtonType {
+                id: editButton
+
+                icon.source: "qrc:/images/controls/edit-3.svg"
+
+                onClicked: serverNameEditDrawer.open()
             }
         }
 
@@ -112,55 +118,28 @@ PageType {
 
             parent: root
 
-            anchors.fill: parent
-            expandedHeight: root.height * 0.35
-
             serverNameText: root.processedServer != null ? root.processedServer.name : ""
         }
 
-        TabBar {
+        TabsType {
             id: tabBar
 
             Layout.fillWidth: true
+            Layout.leftMargin: 16
+            Layout.rightMargin: 16
 
-            currentIndex: (ServersUiController.isServerFromApi(ServersUiController.processedServerId)
-                           && !ServersUiController.serverHasInstalledContainers(ServersUiController.processedServerId)) ?
-                              root.pageSettingsServerData : root.pageSettingsServerProtocols
+            currentIndex: root.availableTabs.indexOf(root.currentTab)
 
-            background: Rectangle {
-                color: AmneziaStyle.color.transparent
-            }
+            Repeater {
+                model: root.availableTabs
 
+                TabButtonType {
+                    required property int modelData
 
-            TabButtonType {
-                id: protocolsTab
-                visible: protocolsPage.installedProtocolsCount
-                width: protocolsPage.installedProtocolsCount ? undefined : 0
-                isSelected: TabBar.tabBar.currentIndex === root.pageSettingsServerProtocols
-                text: qsTr("Protocols")
+                    text: root.tabTitles[modelData]
 
-                Keys.onReturnPressed: TabBar.tabBar.setCurrentIndex(root.pageSettingsServerProtocols)
-                Keys.onEnterPressed: TabBar.tabBar.setCurrentIndex(root.pageSettingsServerProtocols)
-            }
-
-            TabButtonType {
-                id: servicesTab
-                visible: servicesPage.installedServicesCount
-                width: servicesPage.installedServicesCount ? undefined : 0
-                isSelected: TabBar.tabBar.currentIndex === root.pageSettingsServerServices
-                text: qsTr("Services")
-
-                Keys.onReturnPressed: TabBar.tabBar.setCurrentIndex(root.pageSettingsServerServices)
-                Keys.onEnterPressed: TabBar.tabBar.setCurrentIndex(root.pageSettingsServerServices)
-            }
-
-            TabButtonType {
-                id: dataTab
-                isSelected: tabBar.currentIndex === root.pageSettingsServerData
-                text: qsTr("Management")
-
-                Keys.onReturnPressed: TabBar.tabBar.setCurrentIndex(root.pageSettingsServerData)
-                Keys.onEnterPressed: TabBar.tabBar.setCurrentIndex(root.pageSettingsServerData)
+                    onClicked: root.currentTab = modelData
+                }
             }
         }
 
@@ -168,8 +147,10 @@ PageType {
             id: nestedStackView
 
             Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.topMargin: 24
 
-            currentIndex: tabBar.currentIndex
+            currentIndex: root.currentTab
 
             PageSettingsServerProtocols {
                 id: protocolsPage

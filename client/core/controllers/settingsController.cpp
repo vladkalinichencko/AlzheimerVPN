@@ -8,8 +8,9 @@
 #include "version.h"
 #include "ui/utils/qAutoStart.h"
 #include "logger.h"
-#ifdef Q_OS_ANDROID
-    #include "platforms/android/android_controller.h"
+#include "core/controllers/logsController.h"
+#if defined(Q_OS_IOS) || defined(MACOS_NE)
+    #include "core/utils/swiftBridge.h"
 #endif
 
 QString getPlatformName()
@@ -93,6 +94,9 @@ void SettingsController::toggleLogging(bool enable)
     }
 #endif
 #endif
+#if defined(Q_OS_IOS) || defined(MACOS_NE)
+    SWIFT_BRIDGE_NAMESPACE::toggleLogging(enable);
+#endif
     Logger::setServiceLogsEnabled(enable);
 
     if (enable) {
@@ -102,12 +106,8 @@ void SettingsController::toggleLogging(bool enable)
 
 void SettingsController::clearLogs()
 {
-#ifdef Q_OS_ANDROID
-    AndroidController::instance()->clearLogs();
-#else
-    Logger::clearLogs(false);
-    Logger::clearServiceLogs();
-#endif
+    LogsController::clear(LogsController::Stream::App);
+    LogsController::clear(LogsController::Stream::Tunnel);
 }
 
 QByteArray SettingsController::backupAppConfig() const
@@ -306,19 +306,25 @@ bool SettingsController::isDevModeEnabled() const
     return m_isDevModeEnabled;
 }
 
-void SettingsController::resetGatewayEndpoint()
+QString SettingsController::devGatewayEndpoint() const
 {
-    m_appSettingsRepository->resetGatewayEndpoint();
+    return m_appSettingsRepository->devGatewayEndpoint();
 }
 
-void SettingsController::setGatewayEndpoint(const QString &endpoint)
+QString SettingsController::devGatewayProxyStorages() const
 {
-    m_appSettingsRepository->setGatewayEndpoint(endpoint);
+    return m_appSettingsRepository->devGatewayProxyStorages();
 }
 
-QString SettingsController::getGatewayEndpoint() const
+QString SettingsController::devGatewayPublicKey() const
 {
-    return m_appSettingsRepository->isDevGatewayEnv() ? "Dev endpoint" : m_appSettingsRepository->getGatewayEndpoint();
+    return m_appSettingsRepository->devGatewayPublicKey();
+}
+
+void SettingsController::setDevGatewayConfig(const QString &endpoint, const QString &proxyStorages,
+                                             const QString &publicKey)
+{
+    m_appSettingsRepository->setDevGatewayConfig(endpoint, proxyStorages, publicKey);
 }
 
 bool SettingsController::isDevGatewayEnv() const
@@ -329,11 +335,6 @@ bool SettingsController::isDevGatewayEnv() const
 void SettingsController::toggleDevGatewayEnv(bool enabled)
 {
     m_appSettingsRepository->toggleDevGatewayEnv(enabled);
-    if (enabled) {
-        m_appSettingsRepository->setDevGatewayEndpoint();
-    } else {
-        m_appSettingsRepository->resetGatewayEndpoint();
-    }
 }
 
 bool SettingsController::isHomeAdLabelVisible() const

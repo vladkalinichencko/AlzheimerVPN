@@ -205,10 +205,10 @@ extension PacketTunnelProvider {
         }
     }
 
-    func stopXray(completionHandler: () -> Void) {
+    func stopXray(completionHandler: @escaping () -> Void) {
         Socks5Tunnel.quit()
         LibXrayStopXray()
-        completionHandler()
+        hevSocksTunnelGroup.notify(queue: .main, execute: completionHandler)
     }
 
     func sockCallback(fd: uintptr_t) {
@@ -304,6 +304,16 @@ extension PacketTunnelProvider {
         xrayLog(.info, message: "Xray started")
     }
 
+    private func hevSocksLogFile() -> String {
+        guard Log.isLoggingEnabled else { return "stderr" }
+
+        let path = Log.neLogURL.path
+        let fd = open(path, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0o644)
+        guard fd >= 0 else { return "stderr" }
+        close(fd)
+        return path
+    }
+
     private func setupAndRunTun2socks(configData: Data,
                                       address: String,
                                       port: Int,
@@ -323,8 +333,8 @@ extension PacketTunnelProvider {
           task-stack-size: 20480
           connect-timeout: 5000
           read-write-timeout: 60000
-          log-file: stderr
-          log-level: error
+          log-file: '\(hevSocksLogFile())'
+          log-level: warn
           limit-nofile: 65535
         """
 
@@ -335,10 +345,13 @@ extension PacketTunnelProvider {
             return
         }
 
-        DispatchQueue.global().async {
+        hevSocksTunnelGroup.enter()
+        DispatchQueue.global().async { [hevSocksTunnelGroup] in
             xrayLog(.info, message: "Hev socks started")
             completionHandler(nil)
-            Socks5Tunnel.run(withConfig: configurationFilePath)
+            let result = Socks5Tunnel.run(withConfig: configurationFilePath)
+            xrayLog(.info, message: "Hev socks stopped: \(result)")
+            hevSocksTunnelGroup.leave()
         }
     }
 }

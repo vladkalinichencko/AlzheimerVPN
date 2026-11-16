@@ -25,44 +25,53 @@ execute_process(
 
 add_definitions(-DGIT_COMMIT_HASH="${GIT_COMMIT_HASH}")
 
-set(PROD_AGW_PUBLIC_KEY "$ENV{PROD_AGW_PUBLIC_KEY}" CACHE STRING "Production AGW public key")
+set(PROD_AGW_PUBLIC_KEY_B64 "$ENV{PROD_AGW_PUBLIC_KEY_B64}" CACHE STRING "Production AGW public key")
 set(PROD_S3_ENDPOINT "$ENV{PROD_S3_ENDPOINT}" CACHE STRING "Production S3 endpoint")
 set(FALLBACK_S3_ENDPOINT "$ENV{FALLBACK_S3_ENDPOINT}" CACHE STRING "Fallback S3 endpoints")
 
-set(DEV_AGW_PUBLIC_KEY "$ENV{DEV_AGW_PUBLIC_KEY}" CACHE STRING "Development AGW public key")
-set(DEV_AGW_ENDPOINT "$ENV{DEV_AGW_ENDPOINT}" CACHE STRING "Development AGW endpoint")
-set(DEV_S3_ENDPOINT "$ENV{DEV_S3_ENDPOINT}" CACHE STRING "Development S3 endpoint")
+set(SANDBOX_AGW_PUBLIC_KEY_B64 "$ENV{SANDBOX_AGW_PUBLIC_KEY_B64}" CACHE STRING "Sandbox AGW public key")
+set(SANDBOX_AGW_ENDPOINT "$ENV{SANDBOX_AGW_ENDPOINT}" CACHE STRING "Sandbox AGW endpoint")
+set(SANDBOX_S3_ENDPOINT "$ENV{SANDBOX_S3_ENDPOINT}" CACHE STRING "Sandbox S3 endpoint")
 
 set(FREE_V2_ENDPOINT "$ENV{FREE_V2_ENDPOINT}" CACHE STRING "Free API endpoint")
 set(PREM_V1_ENDPOINT "$ENV{PREM_V1_ENDPOINT}" CACHE STRING "Premium API endpoint")
 
-add_definitions(-DPROD_AGW_PUBLIC_KEY="${PROD_AGW_PUBLIC_KEY}")
+add_definitions(-DPROD_AGW_PUBLIC_KEY_B64="${PROD_AGW_PUBLIC_KEY_B64}")
 add_definitions(-DPROD_S3_ENDPOINT="${PROD_S3_ENDPOINT}")
 add_definitions(-DFALLBACK_S3_ENDPOINT="${FALLBACK_S3_ENDPOINT}")
 
-add_definitions(-DDEV_AGW_PUBLIC_KEY="${DEV_AGW_PUBLIC_KEY}")
-add_definitions(-DDEV_AGW_ENDPOINT="${DEV_AGW_ENDPOINT}")
-add_definitions(-DDEV_S3_ENDPOINT="${DEV_S3_ENDPOINT}")
+add_definitions(-DSANDBOX_AGW_PUBLIC_KEY_B64="${SANDBOX_AGW_PUBLIC_KEY_B64}")
+add_definitions(-DSANDBOX_AGW_ENDPOINT="${SANDBOX_AGW_ENDPOINT}")
+add_definitions(-DSANDBOX_S3_ENDPOINT="${SANDBOX_S3_ENDPOINT}")
 
 add_definitions(-DFREE_V2_ENDPOINT="${FREE_V2_ENDPOINT}")
 add_definitions(-DPREM_V1_ENDPOINT="${PREM_V1_ENDPOINT}")
 
 if(WIN32 OR (APPLE AND NOT IOS) OR (LINUX AND NOT ANDROID))
-    set(PACKAGES ${PACKAGES} Widgets)
+    set(PACKAGES ${PACKAGES} Widgets HttpServer)
 endif()
 
 find_package(Qt6 REQUIRED COMPONENTS ${PACKAGES})
 find_package(OpenSSL REQUIRED)
+
+find_package(libagw REQUIRED)
 
 set(LIBS ${LIBS}
     Qt6::Core Qt6::Gui
     Qt6::Network Qt6::Xml Qt6::RemoteObjects
     Qt6::Quick Qt6::Svg Qt6::QuickControls2
     Qt6::Core5Compat Qt6::Concurrent
+    amnezia::libagw
 )
 
+find_package(Qt6 QUIET OPTIONAL_COMPONENTS CorePrivate)
+if(TARGET Qt6::CorePrivate)
+    set(LIBS ${LIBS} Qt6::CorePrivate)
+    add_compile_definitions(AMNEZIA_HAS_QZIPWRITER)
+endif()
+
 if(WIN32 OR (APPLE AND NOT IOS) OR (LINUX AND NOT ANDROID))
-    set(LIBS ${LIBS} Qt6::Widgets)
+    set(LIBS ${LIBS} Qt6::Widgets Qt6::HttpServer)
 endif()
 
 qt_standard_project_setup()
@@ -91,6 +100,7 @@ endif()
 qt6_add_resources(QRC ${QRC}
     ${CMAKE_CURRENT_LIST_DIR}/images/images.qrc
     ${CMAKE_CURRENT_LIST_DIR}/images/flagKit.qrc
+    ${CMAKE_CURRENT_LIST_DIR}/resources/countries.qrc
     ${CMAKE_CURRENT_LIST_DIR}/client_scripts/clientScripts.qrc
     ${CLIENT_QML_QRC_FILE}
     ${CMAKE_CURRENT_LIST_DIR}/server_scripts/serverScripts.qrc
@@ -113,6 +123,8 @@ else()
         ${CMAKE_CURRENT_LIST_DIR}/translations/${CLIENT_TS_PREFIX}_es_ES.ts
         ${CMAKE_CURRENT_LIST_DIR}/translations/${CLIENT_TS_PREFIX}_ko_KR.ts
         ${CMAKE_CURRENT_LIST_DIR}/translations/${CLIENT_TS_PREFIX}_fr_FR.ts
+        ${CMAKE_CURRENT_LIST_DIR}/translations/${CLIENT_TS_PREFIX}_th_TH.ts
+        ${CMAKE_CURRENT_LIST_DIR}/translations/${CLIENT_TS_PREFIX}_id_ID.ts
     )
 endif()
 
@@ -232,6 +244,10 @@ endif()
 
 if(ANDROID)
     include(cmake/android.cmake)
+endif()
+
+if(APPLE)
+    include(cmake/appleAppIcon.cmake)
 endif()
 
 if(IOS)

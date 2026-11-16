@@ -17,15 +17,13 @@
 using namespace amnezia;
 
 namespace {
-    constexpr char gatewayEndpoint[] = "http://gw.amnezia.org:80/";
+    constexpr char prodGatewayEndpoint[] = "http://gw.amnezia.org:80/";
     constexpr char proxyUrlsKey[] = "Conf/proxyUrls/";
 }
 
 SecureAppSettingsRepository::SecureAppSettingsRepository(SecureQSettings* settings, QObject *parent)
     : QObject(parent), m_settings(settings)
 {
-    QString storedEndpoint = value("Conf/gatewayEndpoint", gatewayEndpoint).toString();
-    m_gatewayEndpoint = storedEndpoint.isEmpty() ? gatewayEndpoint : storedEndpoint;
 }
 
 QVariant SecureAppSettingsRepository::value(const QString &key, const QVariant &defaultValue) const
@@ -279,35 +277,46 @@ void SecureAppSettingsRepository::setAppsSplitTunnelingEnabled(bool enabled)
     emit appsSplitTunnelingEnabledChanged(enabled);
 }
 
-QString SecureAppSettingsRepository::getGatewayEndpoint(bool isTestPurchase) const
+GatewayEnvironment SecureAppSettingsRepository::gatewayEnvironment(bool isTestPurchase) const
 {
     if (isTestPurchase) {
-        return QString(DEV_AGW_ENDPOINT);
+        return { SANDBOX_AGW_ENDPOINT, QByteArray::fromBase64(SANDBOX_AGW_PUBLIC_KEY_B64), SANDBOX_S3_ENDPOINT, {}, true };
     }
-    return m_gatewayEndpoint;
+    if (isDevGatewayEnv()) {
+        return {
+            devGatewayEndpoint(), QByteArray::fromBase64(devGatewayPublicKey().toUtf8()), devGatewayProxyStorages(), {}, true
+        };
+    }
+    return { prodGatewayEndpoint, QByteArray::fromBase64(PROD_AGW_PUBLIC_KEY_B64), PROD_S3_ENDPOINT,
+             FALLBACK_S3_ENDPOINT, false };
 }
 
-void SecureAppSettingsRepository::setGatewayEndpoint(const QString &endpoint)
+QString SecureAppSettingsRepository::devGatewayEndpoint() const
 {
-    m_gatewayEndpoint = endpoint;
-    setValue("Conf/gatewayEndpoint", endpoint);
+    return value("Conf/devGatewayEndpoint").toString();
 }
 
-void SecureAppSettingsRepository::resetGatewayEndpoint()
+QString SecureAppSettingsRepository::devGatewayProxyStorages() const
 {
-    m_gatewayEndpoint = gatewayEndpoint;
-    setValue("Conf/gatewayEndpoint", gatewayEndpoint);
+    return value("Conf/devGatewayProxyStorages").toString();
 }
 
-void SecureAppSettingsRepository::setDevGatewayEndpoint()
+QString SecureAppSettingsRepository::devGatewayPublicKey() const
 {
-    m_gatewayEndpoint = QString(DEV_AGW_ENDPOINT);
-    setValue("Conf/gatewayEndpoint", DEV_AGW_ENDPOINT);
+    return value("Conf/devGatewayPublicKey").toString();
 }
 
-bool SecureAppSettingsRepository::isDevGatewayEnv(bool isTestPurchase) const
+void SecureAppSettingsRepository::setDevGatewayConfig(const QString &endpoint, const QString &proxyStorages,
+                                                      const QString &publicKey)
 {
-    return isTestPurchase ? true : value("Conf/devGatewayEnv", false).toBool();
+    setValue("Conf/devGatewayEndpoint", endpoint);
+    setValue("Conf/devGatewayProxyStorages", proxyStorages);
+    setValue("Conf/devGatewayPublicKey", publicKey);
+}
+
+bool SecureAppSettingsRepository::isDevGatewayEnv() const
+{
+    return value("Conf/devGatewayEnv", false).toBool();
 }
 
 void SecureAppSettingsRepository::toggleDevGatewayEnv(bool enabled)
@@ -380,6 +389,69 @@ void SecureAppSettingsRepository::setScreenshotsEnabled(bool enabled)
 {
     setValue("Conf/screenshotsEnabled", enabled);
     emit screenshotsEnabledChanged(enabled);
+}
+
+int SecureAppSettingsRepository::countryListSortMode(const QString &listId) const
+{
+    return value("Conf/countryListSortMode/" + listId, 0).toInt();
+}
+
+void SecureAppSettingsRepository::setCountryListSortMode(const QString &listId, int mode)
+{
+    setValue("Conf/countryListSortMode/" + listId, mode);
+}
+
+QStringList SecureAppSettingsRepository::favoriteLocations(const QString &serverId) const
+{
+    QStringList codes = value("Conf/favoriteLocations").toMap().value(serverId).toStringList();
+    codes.removeAll(QString());
+    codes.removeDuplicates();
+    codes.sort();
+    return codes;
+}
+
+void SecureAppSettingsRepository::setFavoriteLocations(const QString &serverId, const QStringList &codes)
+{
+    if (serverId.isEmpty()) {
+        return;
+    }
+    QVariantMap favorites = value("Conf/favoriteLocations").toMap();
+    if (codes.isEmpty()) {
+        favorites.remove(serverId);
+    } else {
+        favorites.insert(serverId, codes);
+    }
+    setValue("Conf/favoriteLocations", favorites);
+}
+
+void SecureAppSettingsRepository::removeFavoriteLocations(const QString &serverId)
+{
+    QVariantMap favorites = value("Conf/favoriteLocations").toMap();
+    if (favorites.remove(serverId) > 0) {
+        setValue("Conf/favoriteLocations", favorites);
+    }
+}
+
+void SecureAppSettingsRepository::migrateLegacyFavoriteLocations(const QStringList &serverIds)
+{
+    // Before per-subscription favorites the key held one list shared by all servers
+    const QVariant stored = value("Conf/favoriteLocations");
+    const int type = stored.typeId();
+    if (type != QMetaType::QStringList && type != QMetaType::QVariantList && type != QMetaType::QString) {
+        return;
+    }
+
+    QStringList codes = stored.toStringList();
+    codes.removeAll(QString());
+    codes.removeDuplicates();
+
+    QVariantMap favorites;
+    if (!codes.isEmpty()) {
+        for (const QString &serverId : serverIds) {
+            favorites.insert(serverId, codes);
+        }
+    }
+    setValue("Conf/favoriteLocations", favorites);
 }
 
 bool SecureAppSettingsRepository::isNewsNotifications() const
@@ -490,4 +562,34 @@ QByteArray SecureAppSettingsRepository::xraySavedConfigs() const
 void SecureAppSettingsRepository::setXraySavedConfigs(const QByteArray &data)
 {
     setValue("Xray/savedConfigs", data);
+}
+
+QString SecureAppSettingsRepository::localProxyOwnerId() const
+{
+    return value("Conf/localProxyOwnerId", "").toString();
+}
+
+void SecureAppSettingsRepository::setLocalProxyOwnerId(const QString &serverId)
+{
+    setValue("Conf/localProxyOwnerId", serverId);
+}
+
+quint16 SecureAppSettingsRepository::localProxyPort() const
+{
+    return static_cast<quint16>(value("Conf/localProxyPort", 10808).toUInt());
+}
+
+void SecureAppSettingsRepository::setLocalProxyPort(quint16 port)
+{
+    setValue("Conf/localProxyPort", port);
+}
+
+bool SecureAppSettingsRepository::isLocalProxyPortUserDefined() const
+{
+    return value("Conf/localProxyPortUserDefined", false).toBool();
+}
+
+void SecureAppSettingsRepository::setLocalProxyPortUserDefined(bool userDefined)
+{
+    setValue("Conf/localProxyPortUserDefined", userDefined);
 }

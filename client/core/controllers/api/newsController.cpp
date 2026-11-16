@@ -76,12 +76,10 @@ QFuture<QPair<ErrorCode, QJsonArray>> NewsController::fetchNews()
         return QtFuture::makeReadyValueFuture(qMakePair(ErrorCode::NoError, QJsonArray()));
     }
 
-    auto gatewayController = QSharedPointer<GatewayController>::create(
-            m_appSettingsRepository->getGatewayEndpoint(),
-            m_appSettingsRepository->isDevGatewayEnv(),
-            apiDefs::requestTimeoutMsecs,
-            m_appSettingsRepository->isStrictKillSwitchEnabled(),
-            m_appSettingsRepository);
+    QSharedPointer<GatewayController> gatewayController(
+            new GatewayController(m_appSettingsRepository->gatewayEnvironment(), apiDefs::requestTimeoutMsecs,
+                                  m_appSettingsRepository->isStrictKillSwitchEnabled(), m_appSettingsRepository),
+            &QObject::deleteLater);
 
     // both country codes and service types are arrays here, one entry per gateway stack the user has
     const QJsonObject payload = GatewayPayloadBuilder(m_appSettingsRepository)

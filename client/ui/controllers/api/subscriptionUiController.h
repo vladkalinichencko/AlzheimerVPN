@@ -77,7 +77,7 @@ public slots:
     bool getAccountInfo(const QString &serverId, bool reload);
     void getRenewalLink(const QString &serverId);
 
-    void updateApiCountryModel();
+    void updateApiCountryModel(const QString &serverId);
     void updateApiDevicesModel();
 
 signals:
@@ -123,7 +123,7 @@ private:
 
         // Update flow
         QString serverId;
-        QString newCountryCode;
+        QString serverCountryCode;
         QString newCountryName;
         bool isConnectEvent = false;
         bool reloadServiceConfig = false;
@@ -137,6 +137,7 @@ private:
 private:
     bool m_isValidatingConfig = false;
     void emitUpdateSuccess(bool wasSubscriptionExpired, bool reloadServiceConfig, const QString &newCountryName);
+    void finishCaptchaFlow();
     void emitCaptchaUpdateSuccess();
     void resolveUpdateCaptcha(const QString &captchaId, const QString &solution);
 
