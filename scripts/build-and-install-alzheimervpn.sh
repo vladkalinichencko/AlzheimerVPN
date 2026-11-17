@@ -114,11 +114,12 @@ if [[ ! -s "$KEY1" || ! -s "$KEY2" ]]; then
 fi
 [[ -s "$KEY1" && -s "$KEY2" ]] || { echo "Failed to extract two PEM blocks." >&2; exit 1; }
 
-# libagw receives PEM text after base64-decoding the *_B64 macros. Encode the
-# extracted PEM blocks as single-line base64; PEM parsers accept the trailing
-# newline, and the old SHA512/AES proxy-list path now lives inside libagw.
+# libagw receives PEM text after base64-decoding the *_B64 macros. The upstream
+# binary embeds the PEM without a trailing newline, and libagw derives the
+# proxy-list AES key from sha512(pem bytes), so the newline must be stripped
+# here or every storage list comes back undecodable.
 pem_to_b64() {
-  base64 < "$1" | tr -d '\n'
+  printf '%s' "$(cat "$1")" | base64 | tr -d '\n'
 }
 
 # PROD/SANDBOX assignment. The order in `strings -a` is layout-dependent and was
