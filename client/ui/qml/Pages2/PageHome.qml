@@ -159,7 +159,7 @@ PageType {
                 }
             }
 
-            LabelTextType {
+            SmallTextType {
                 id: connectionDiagnosticLabel
                 objectName: "connectionDiagnosticLabel"
 
@@ -170,7 +170,7 @@ PageType {
 
                 visible: ConnectionController.hasConnectionDiagnostic
                 text: ConnectionController.connectionDiagnosticText
-                color: ConnectionController.isConnectionDiagnosticProblem ? AmneziaStyle.color.vibrantRed : AmneziaStyle.color.mutedGray
+                color: ConnectionController.isConnectionDiagnosticProblem ? AmneziaStyle.color.statusDestructive : AmneziaStyle.color.textTertiary
 
                 font.pixelSize: 14
                 horizontalAlignment: Text.AlignHCenter

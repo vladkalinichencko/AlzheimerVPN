@@ -1,9 +1,10 @@
 import QtQuick
+import QtQuick.Controls.impl
 import Style 1.0
 
 import "../Controls2"
 
-LabelWithButtonType {
+ListItemType {
     id: root
 
     property string hostname
@@ -14,20 +15,18 @@ LabelWithButtonType {
     signal removeRequested()
 
     text: hostname
-    descriptionText: addresses
-    hideDescription: false
-    rightImageSource: "qrc:/images/controls/trash.svg"
-    rightImageColor: AmneziaStyle.color.paleGray
-    buttonImageSource: failed ? "qrc:/images/controls/close.svg"
-                             : succeeded ? "qrc:/images/controls/check.svg" : ""
-    Binding {
-        target: root.eyeButton
-        property: "imageColor"
-        value: root.failed ? AmneziaStyle.color.vibrantRed : AmneziaStyle.color.vibrantGreen
+    subtitle: addresses
+    trailingIconSource: "qrc:/images/controls/trash.svg"
+
+    trailingContent: IconImage {
+        width: 24
+        height: 24
+
+        visible: root.succeeded || root.failed
+        source: root.failed ? "qrc:/images/controls/close.svg" : "qrc:/images/controls/check.svg"
+        sourceSize: Qt.size(24, 24)
+        color: root.failed ? AmneziaStyle.color.statusDestructive : AmneziaStyle.color.statusSuccess
     }
-    Component.onCompleted: {
-        eyeButton.isFocusable = false
-        eyeButton.hoverEnabled = false
-    }
-    clickedFunction: function() { root.removeRequested() }
+
+    onClicked: root.removeRequested()
 }

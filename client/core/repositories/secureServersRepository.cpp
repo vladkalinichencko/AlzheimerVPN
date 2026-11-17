@@ -80,6 +80,24 @@ SecureServersRepository::SecureServersRepository(SecureQSettings *settings, QObj
 {
     loadFromStorage();
     persistDefaultServerFields();
+    injectUiTestServer();
+}
+
+void SecureServersRepository::injectUiTestServer()
+{
+    if (!qEnvironmentVariableIsSet("ALZHEIMERVPN_UI_TEST_HOME") || !m_orderedServerIds.isEmpty()) {
+        return;
+    }
+
+    const QString serverId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    QJsonObject config;
+    config[configKey::formatVersion] = serverConfigUtils::currentConfigFormatVersion;
+    config[configKey::description] = QStringLiteral("UI preview");
+    config[configKey::hostName] = QStringLiteral("127.0.0.1");
+
+    m_serverJsonById.insert(serverId, embedStorageServerId(serverId, config));
+    m_orderedServerIds.append(serverId);
+    m_defaultServerId = serverId;
 }
 
 QVariant SecureServersRepository::value(const QString &key, const QVariant &defaultValue) const

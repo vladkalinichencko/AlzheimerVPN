@@ -64,6 +64,7 @@ signals:
 
 private:
     void loadFromStorage();
+    void injectUiTestServer();
     void updateDefaultServerFromStorage();
     void persistDefaultServerFields();
 

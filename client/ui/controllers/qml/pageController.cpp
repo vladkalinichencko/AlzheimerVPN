@@ -62,6 +62,9 @@ PageController::PageController(ServersController* serversController, SettingsCon
 
 bool PageController::isStartPageVisible()
 {
+    if (qEnvironmentVariableIsSet("ALZHEIMERVPN_UI_TEST_HOME")) {
+        return false;
+    }
     return m_serversController->getServersCount() == 0;
 }
 
