@@ -146,6 +146,11 @@ PREM_V1_ENDPOINT="${PREM_V1_ENDPOINT:-52.223.54.40}"
 
 [[ ${#PROD_AGW_PUBLIC_KEY_B64} -gt 400 ]] || { echo "PROD key too short" >&2; exit 1; }
 [[ ${#SANDBOX_AGW_PUBLIC_KEY_B64} -gt 400 ]] || { echo "SANDBOX key too short" >&2; exit 1; }
+for agw_key_b64 in "$PROD_AGW_PUBLIC_KEY_B64" "$SANDBOX_AGW_PUBLIC_KEY_B64"; do
+  pem_tail=$(printf '%s' "$agw_key_b64" | base64 -d 2>/dev/null | tail -c 1 | od -An -tx1 | tr -d ' ')
+  [[ -n "$pem_tail" && "$pem_tail" != "0a" ]] \
+    || { echo "AGW key must be a PEM block without a trailing newline; libagw keys the proxy list off the exact PEM bytes." >&2; exit 1; }
+done
 [[ -n "$PROD_S3_ENDPOINT" ]] || { echo "Failed to extract production S3 endpoints from original Amnezia binary." >&2; exit 1; }
 [[ -n "$SANDBOX_S3_ENDPOINT" ]] || { echo "Failed to extract sandbox S3 endpoint from original Amnezia binary." >&2; exit 1; }
 
@@ -268,6 +273,9 @@ if [[ $DO_TEST -eq 1 ]]; then
   step "test_connection_health"
   "$BUILD_DIR/client/tests/test_connection_health"
 fi
+
+step "Verify AGW key"
+AGW_CMAKE_CACHE="$BUILD_DIR/CMakeCache.txt" python3 "$REPO_DIR/tests/agw-key/check_agw_key.py"
 
 # --- 5. Stage /private/tmp/AlzheimerVPN.app with all helper binaries.
 step "Stage bundle"
