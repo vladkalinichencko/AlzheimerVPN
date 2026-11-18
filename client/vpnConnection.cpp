@@ -43,6 +43,12 @@ using namespace ProtocolUtils;
 
 namespace {
 constexpr int kMaxConnectedRecoveryAttempts = 3;
+const QStringList kConnectivityProbeHosts = {
+    QStringLiteral("1.1.1.1"),
+    QStringLiteral("1.0.0.1"),
+    QStringLiteral("8.8.8.8"),
+    QStringLiteral("9.9.9.9"),
+};
 // QRemoteObjectPendingReply waits 30 s by default; a dead helper must not stall the state machine that long.
 constexpr int kIpcReplyTimeoutMsecs = 5000;
 
@@ -1431,6 +1437,7 @@ void VpnConnection::onConnectivityProbeSucceeded()
     stopConnectivityProbe();
     markLastError(ErrorCode::NoError);
     m_connectedRecoveryAttempts = 0;
+    m_consecutiveProbeFailures = 0;
     m_noTrafficRecoveryAttempted = false;
     if (m_connectionHealth != ConnectionHealth::DnsFailed) {
         setConnectionHealth(ConnectionHealth::Healthy);
@@ -1446,6 +1453,10 @@ void VpnConnection::onConnectivityProbeFailed()
 
     stopConnectivityProbe();
     if (m_silentReconnectInProgress) {
+        return;
+    }
+    ++m_consecutiveProbeFailures;
+    if (m_consecutiveProbeFailures < 3) {
         return;
     }
     recoverConnectedTunnel(ConnectionHealth::NoTraffic);
@@ -1518,6 +1529,7 @@ void VpnConnection::stopPendingNetworkAction()
 void VpnConnection::startConnectedHealthCheck()
 {
     m_healthChecksWithoutTraffic = 0;
+    m_consecutiveProbeFailures = 0;
     if (!connectionHealthProblem(m_connectionHealth)) {
         setConnectionHealth(ConnectionHealth::CheckingTraffic);
     }
@@ -1532,6 +1544,7 @@ void VpnConnection::stopConnectedHealthCheck()
 {
     m_healthTimer.stop();
     m_healthChecksWithoutTraffic = 0;
+    m_consecutiveProbeFailures = 0;
 }
 
 void VpnConnection::stopConnectedRecovery()
@@ -1587,7 +1600,6 @@ bool VpnConnection::recoverConnectedTunnel(ConnectionHealth health, ErrorCode er
     }
 
     if (m_connectedRecoveryAttempts >= kMaxConnectedRecoveryAttempts) {
-        stopConnectedHealthCheck();
         qWarning().noquote()
             << "AmneziaDiagnostic event=auto_recover_exhausted"
             << "diagnostic=" + QString::number(static_cast<int>(health))
@@ -1619,33 +1631,55 @@ void VpnConnection::startConnectivityProbe()
         return;
     }
 
+    m_connectivityProbeTarget = 0;
+    startConnectivityProbeAttempt();
+}
+
+void VpnConnection::startConnectivityProbeAttempt()
+{
+    m_connectivityProbeHost = kConnectivityProbeHosts.at(m_connectivityProbeTarget);
+
     auto *socket = new QTcpSocket(this);
     m_connectivityProbe.reset(socket);
     m_connectivityProbeStartedMs = QDateTime::currentMSecsSinceEpoch();
 
     connect(socket, &QTcpSocket::connected, this, [this]() {
         const qint64 connectMs = QDateTime::currentMSecsSinceEpoch() - m_connectivityProbeStartedMs;
-        qInfo() << "Connectivity probe to 1.1.1.1:443 succeeded connect_ms=" << connectMs;
+        qInfo() << "Connectivity probe to" << m_connectivityProbeHost << ":443 succeeded connect_ms=" << connectMs;
         recordConnectivityProbe(connectMs);
         onConnectivityProbeSucceeded();
     });
     connect(socket, &QTcpSocket::errorOccurred, this, [this, socket](QAbstractSocket::SocketError error) {
-        qWarning() << "Connectivity probe to 1.1.1.1:443 failed"
+        qWarning() << "Connectivity probe to" << m_connectivityProbeHost << ":443 failed"
                    << error << socket->errorString();
-        recordConnectivityProbe(-1);
-        onConnectivityProbeFailed();
+        advanceConnectivityProbe();
     });
 
     QPointer<QTcpSocket> probe(socket);
-    QTimer::singleShot(5000, this, [this, probe]() {
+    QTimer::singleShot(8000, this, [this, probe]() {
         if (probe && m_connectivityProbe.get() == probe && probe->state() != QAbstractSocket::ConnectedState) {
-            qWarning() << "Connectivity probe to 1.1.1.1:443 timed out";
-            recordConnectivityProbe(-1);
-            onConnectivityProbeFailed();
+            qWarning() << "Connectivity probe to" << m_connectivityProbeHost << ":443 timed out";
+            advanceConnectivityProbe();
         }
     });
 
     connectConnectivityProbe(socket);
+}
+
+void VpnConnection::advanceConnectivityProbe()
+{
+    ++m_connectivityProbeTarget;
+    if (m_connectivityProbeTarget < kConnectivityProbeHosts.size()) {
+        QTcpSocket *attempt = m_connectivityProbe.release();
+        attempt->disconnect(this);
+        attempt->abort();
+        attempt->deleteLater();
+        startConnectivityProbeAttempt();
+        return;
+    }
+
+    recordConnectivityProbe(-1);
+    onConnectivityProbeFailed();
 }
 
 // macOS retransmits a lost SYN after one second, so a connect that took a second
@@ -1693,7 +1727,7 @@ void VpnConnection::stopConnectivityProbe()
 
 void VpnConnection::connectConnectivityProbe(QTcpSocket *socket)
 {
-    socket->connectToHost(QStringLiteral("1.1.1.1"), 443);
+    socket->connectToHost(m_connectivityProbeHost, 443);
 }
 
 void VpnConnection::markLastError(ErrorCode error)

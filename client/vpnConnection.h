@@ -113,6 +113,8 @@ private:
     QTimer m_dnsFlushDebounce;
     std::unique_ptr<QTcpSocket> m_connectivityProbe;
     qint64 m_connectivityProbeStartedMs = 0;
+    int m_connectivityProbeTarget = 0;
+    QString m_connectivityProbeHost;
     // Connect time of the last probes in ms, -1 for a failed probe.
     QList<qint64> m_connectivityProbeWindow;
     void recordConnectivityProbe(qint64 connectMs);
@@ -128,6 +130,7 @@ private:
    ConnectionHealth m_connectionHealth = ConnectionHealth::Idle;
    ErrorCode m_lastError = ErrorCode::NoError;
    int m_healthChecksWithoutTraffic = 0;
+   int m_consecutiveProbeFailures = 0;
    int m_connectedRecoveryAttempts = 0;
    bool m_noTrafficRecoveryAttempted = false;
    bool m_silentReconnectInProgress = false;
@@ -163,6 +166,8 @@ private:
    bool handleSilentReconnectFailure(ConnectionHealth health, ErrorCode error);
    bool recoverConnectedTunnel(ConnectionHealth health, ErrorCode error = ErrorCode::VpnNoTrafficError);
    void startConnectivityProbe();
+   void startConnectivityProbeAttempt();
+   void advanceConnectivityProbe();
    void stopConnectivityProbe();
    void markLastError(ErrorCode error);
 
