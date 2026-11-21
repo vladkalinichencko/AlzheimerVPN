@@ -268,6 +268,7 @@ bool DnsUtilsMacos::restoreResolvers() {
 
   m_prevServices.clear();
   removeStaleLocalResolverOverrides();
+  flushSystemDns();
   return true;
 }
 

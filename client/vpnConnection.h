@@ -60,6 +60,7 @@ public slots:
     void disconnectFromVpn();
     void refreshSiteSplitTunnelRoutes();
     void syncAlwaysBlockedSites();
+    void sendAlwaysBlockedSites();
 
     void onKillSwitchModeChanged(bool enabled);
     void setConnectionDiagnostic(ConnectionHealth health);
@@ -111,6 +112,7 @@ private:
     // hundreds of "Failed to flush DNS" warnings on configs with large split
     // lists (and also slowed teardown by piling work on the daemon).
     QTimer m_dnsFlushDebounce;
+    QTimer m_alwaysBlockedSyncDebounce;
     std::unique_ptr<QTcpSocket> m_connectivityProbe;
     qint64 m_connectivityProbeStartedMs = 0;
     int m_connectivityProbeTarget = 0;
@@ -135,6 +137,7 @@ private:
    bool m_noTrafficRecoveryAttempted = false;
    bool m_silentReconnectInProgress = false;
    bool m_stoppingAfterFailure = false;
+   bool m_connectionProtectionActive = false;
    enum class PendingNetworkAction {
        None,
        StartConnection,
@@ -170,6 +173,7 @@ private:
    void advanceConnectivityProbe();
    void stopConnectivityProbe();
    void markLastError(ErrorCode error);
+   void releaseConnectionProtection();
 
    void appendSplitTunnelingConfig();
    void appendKillSwitchConfig();

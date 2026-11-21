@@ -160,6 +160,10 @@ VpnConnection::VpnConnection(SecureServersRepository* serversRepository, SecureA
         onConnectingTimedOut();
     });
 
+    m_alwaysBlockedSyncDebounce.setSingleShot(true);
+    connect(&m_alwaysBlockedSyncDebounce, &QTimer::timeout, this,
+            &VpnConnection::sendAlwaysBlockedSites);
+
     m_dnsFlushDebounce.setSingleShot(true);
     m_dnsFlushDebounce.setInterval(500);
 #ifdef AMNEZIA_DESKTOP
@@ -475,6 +479,13 @@ void VpnConnection::setRepositories(SecureServersRepository* serversRepository, 
 void VpnConnection::syncAlwaysBlockedSites()
 {
 #if defined(Q_OS_MACOS) && !defined(MACOS_NE)
+    m_alwaysBlockedSyncDebounce.start(500);
+#endif
+}
+
+void VpnConnection::sendAlwaysBlockedSites()
+{
+#if defined(Q_OS_MACOS) && !defined(MACOS_NE)
     if (!m_appSettingsRepository) {
         return;
     }
@@ -748,6 +759,7 @@ void VpnConnection::connectToVpn(const QString &serverId, DockerContainer contai
         emit vpnProtocolError(ErrorCode::AmneziaServiceConnectionFailed);
         return;
     }
+    m_connectionProtectionActive = m_appSettingsRepository->isKillSwitchEnabled();
 #endif
 
 #ifdef AMNEZIA_DESKTOP
@@ -1223,14 +1235,7 @@ void VpnConnection::startSilentReconnect()
 
 void VpnConnection::disconnectFromVpn()
 {
-#if defined(Q_OS_MACOS) && !defined(MACOS_NE)
-    IpcClient::withInterface([](QSharedPointer<IpcInterfaceReplica> iface) {
-        auto reply = iface->setConnectionProtection(false, QJsonObject());
-        if (!reply.waitForFinished(kIpcReplyTimeoutMsecs) || !reply.returnValue()) {
-            qWarning() << "Failed to release connection kill switch";
-        }
-    });
-#endif
+    releaseConnectionProtection();
 #if defined(Q_OS_IOS) || defined(MACOS_NE)
     // iOS/macOS NE use IosController directly; m_vpnProtocol is not set there.
     IosController::Instance()->disconnectVpn();
@@ -1276,6 +1281,25 @@ void VpnConnection::disconnectFromVpn()
     }
 }
 
+void VpnConnection::releaseConnectionProtection()
+{
+#if defined(Q_OS_MACOS) && !defined(MACOS_NE)
+    if (!m_connectionProtectionActive) {
+        return;
+    }
+    const bool released = IpcClient::withInterface(
+        [](QSharedPointer<IpcInterfaceReplica> iface) {
+            auto reply = iface->setConnectionProtection(false, QJsonObject());
+            if (!reply.waitForFinished(kIpcReplyTimeoutMsecs) || !reply.returnValue()) {
+                qWarning() << "Failed to release connection kill switch";
+                return false;
+            }
+            return true;
+        });
+    m_connectionProtectionActive = !released;
+#endif
+}
+
 void VpnConnection::setConnectionState(Vpn::ConnectionState state) {
     const Vpn::ConnectionState previousState = m_connectionState;
 
@@ -1312,6 +1336,11 @@ void VpnConnection::setConnectionState(Vpn::ConnectionState state) {
         onConnectionStateChanged(state);
         m_connectionState = previousState;
         return;
+    }
+
+    if (state == Vpn::ConnectionState::Error ||
+        state == Vpn::ConnectionState::Disconnected) {
+        releaseConnectionProtection();
     }
 
     m_connectionState = state;
