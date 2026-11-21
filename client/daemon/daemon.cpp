@@ -46,6 +46,15 @@ Daemon::Daemon(QObject* parent) : QObject(parent) {
 
   m_handshakeTimer.setSingleShot(true);
   connect(&m_handshakeTimer, &QTimer::timeout, this, &Daemon::checkHandshake);
+
+  m_splitTunnelDnsRetryTimer.setSingleShot(true);
+  connect(&m_splitTunnelDnsRetryTimer, &QTimer::timeout, this, [this]() {
+    const QStringList hosts = m_splitTunnelDnsRetryHosts.values();
+    m_splitTunnelDnsRetryHosts.clear();
+    if (!hosts.isEmpty()) {
+      refreshSplitTunnelDnsRoutes(hosts);
+    }
+  });
 }
 
 Daemon::~Daemon() {
@@ -512,6 +521,7 @@ bool Daemon::deactivate(bool emitSignals) {
   // resolvers so its routes are removed and in-flight resolves are obsoleted.
   m_splitTunnelDnsKillSwitchEnabled = false;
   ++m_splitTunnelDnsGeneration;
+  resetSplitTunnelDnsRetry();
   clearSplitTunnelDnsRoutes();
   m_splitTunnelDnsResolveHosts.clear();
   if (dnsutils()) {
@@ -675,7 +685,7 @@ void Daemon::checkHandshake() {
         emit connected(status.m_pubkey);
         configureSplitTunnelDnsRoutes(config);
         refreshSplitTunnelStaticRoutes(config.m_excludedAddresses);
-        refreshSplitTunnelDnsRoutes();
+        refreshSplitTunnelDnsRoutes(m_splitTunnelDnsResolveHosts);
       }
     }
 
@@ -697,6 +707,7 @@ void Daemon::configureSplitTunnelDnsRoutes(const InterfaceConfig& config) {
 
   ++m_splitTunnelDnsGeneration;
   m_splitTunnelDnsKillSwitchEnabled = config.m_killSwitchEnabled;
+  resetSplitTunnelDnsRetry();
   clearSplitTunnelDnsRoutes();
 
   m_splitTunnelDnsResolveHosts.clear();
@@ -738,9 +749,9 @@ void Daemon::refreshSplitTunnelStaticRoutes(const QStringList& addresses) {
   }
 }
 
-void Daemon::refreshSplitTunnelDnsRoutes() {
+void Daemon::refreshSplitTunnelDnsRoutes(const QStringList& hosts) {
   const int generation = m_splitTunnelDnsGeneration;
-  for (const QString& host : m_splitTunnelDnsResolveHosts) {
+  for (const QString& host : hosts) {
     QHostInfo::lookupHost(host, this, [this, host, generation](const QHostInfo& info) {
       if (generation != m_splitTunnelDnsGeneration) {
         return;
@@ -753,13 +764,36 @@ void Daemon::refreshSplitTunnelDnsRoutes() {
       }
       ips.removeDuplicates();
       if (!ips.isEmpty()) {
+        m_splitTunnelDnsRetryHosts.remove(host);
         onSplitTunnelHostResolved(host, ips);
       } else {
+        m_splitTunnelDnsRetryHosts.insert(host);
         logger.warning() << "Split-tunnel DNS refresh failed for" << host
                          << info.errorString();
+        scheduleSplitTunnelDnsRetry();
       }
     });
   }
+}
+
+void Daemon::scheduleSplitTunnelDnsRetry()
+{
+  if (m_splitTunnelDnsRetryTimer.isActive()) {
+    return;
+  }
+  const int delayMs = qMin(5000 << qMin(m_splitTunnelDnsRetryAttempt, 7), 600000);
+  ++m_splitTunnelDnsRetryAttempt;
+  logger.info() << "Split-tunnel DNS retry scheduled in" << delayMs
+                << "ms attempt=" << m_splitTunnelDnsRetryAttempt
+                << "pending=" << m_splitTunnelDnsRetryHosts.size();
+  m_splitTunnelDnsRetryTimer.start(delayMs);
+}
+
+void Daemon::resetSplitTunnelDnsRetry()
+{
+  m_splitTunnelDnsRetryTimer.stop();
+  m_splitTunnelDnsRetryHosts.clear();
+  m_splitTunnelDnsRetryAttempt = 0;
 }
 
 void Daemon::onSplitTunnelHostResolved(const QString& host,

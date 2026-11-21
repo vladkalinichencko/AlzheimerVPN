@@ -67,7 +67,9 @@ class Daemon : public QObject {
   void configureSplitTunnelDnsRoutes(const InterfaceConfig& config);
   void refreshSplitTunnelStaticRoutes(const QStringList& addresses);
   void clearSplitTunnelDnsRoutes();
-  void refreshSplitTunnelDnsRoutes();
+  void refreshSplitTunnelDnsRoutes(const QStringList& hosts);
+  void scheduleSplitTunnelDnsRetry();
+  void resetSplitTunnelDnsRetry();
  protected:
   virtual bool run(Op op, const InterfaceConfig& config) {
     Q_UNUSED(op);
@@ -107,6 +109,9 @@ class Daemon : public QObject {
   // so in-flight async resolves can detect they are obsolete and stop.
   int m_splitTunnelDnsGeneration = 0;
   bool m_splitTunnelDnsKillSwitchEnabled = false;
+  QTimer m_splitTunnelDnsRetryTimer;
+  QSet<QString> m_splitTunnelDnsRetryHosts;
+  int m_splitTunnelDnsRetryAttempt = 0;
 };
 
 #endif  // DAEMON_H

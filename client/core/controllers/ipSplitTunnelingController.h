@@ -2,6 +2,7 @@
 #define IPSPLITTUNNELINGCONTROLLER_H
 
 #include <QObject>
+#include <QTimer>
 #include <QVector>
 #include <QMap>
 #include <QPair>
@@ -61,12 +62,15 @@ private:
     bool validateHostname(const QString &hostname) const;
     void processSiteAfterResolve(const QString &hostname, const QStringList &ips);
     void processSite(const QString &hostname, const QStringList &ips);
+    void refreshCachedSiteIps(RouteMode mode);
     void clearChecks();
 
     SecureAppSettingsRepository* m_appSettingsRepository;
     RouteMode m_currentRouteMode;
     QVector<QPair<QString, QStringList>> m_sites;
     QMap<QString, SiteCheck> m_siteChecks;
+    QMap<QString, qint64> m_cacheIpLookupAt;
+    QTimer m_failedSitesRecheckTimer;
 };
 
 #endif // IPSPLITTUNNELINGCONTROLLER_H

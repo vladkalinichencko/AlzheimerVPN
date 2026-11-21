@@ -195,6 +195,8 @@ bool KillSwitch::setAlwaysBlockedSites(const QStringList &ranges)
 
     const bool unchanged = ranges == m_alwaysBlockedSites;
     m_alwaysBlockedSites = ranges;
+    qInfo() << "KillSwitch::setAlwaysBlockedSites count=" << ranges.size()
+            << "changed=" << !unchanged;
 
 #ifdef Q_OS_MACOS
     if (isStrictKillSwitchEnabled()) {
@@ -223,6 +225,7 @@ void KillSwitch::applyAlwaysBlockedSites()
     MacOSFirewall::setAnchorEnabled(QStringLiteral("110.allowNets"), false);
     MacOSFirewall::setAnchorEnabled(QStringLiteral("120.blockNets"), true);
     MacOSFirewall::setAnchorTable(QStringLiteral("120.blockNets"), true, QStringLiteral("blocknets"), m_alwaysBlockedSites);
+    qInfo() << "KillSwitch::applyAlwaysBlockedSites applied count=" << m_alwaysBlockedSites.size();
     MacOSFirewall::setAnchorEnabled(QStringLiteral("200.allowVPN"), true);
     MacOSFirewall::setAnchorEnabled(QStringLiteral("250.blockIPv6"), false);
     MacOSFirewall::setAnchorEnabled(QStringLiteral("290.allowDHCP"), false);

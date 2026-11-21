@@ -2,6 +2,7 @@
 #include "core/utils/networkUtilities.h"
 #include "core/utils/splitTunnelRule.h"
 #include <QJsonObject>
+#include <QDateTime>
 #include <QDebug>
 
 IpSplitTunnelingController::IpSplitTunnelingController(SecureAppSettingsRepository* appSettingsRepository, QObject* parent)
@@ -14,6 +15,21 @@ IpSplitTunnelingController::IpSplitTunnelingController(SecureAppSettingsReposito
         m_currentRouteMode = RouteMode::VpnOnlyForwardSites;
     }
     fillSites();
+
+    m_failedSitesRecheckTimer.setInterval(60000);
+    connect(&m_failedSitesRecheckTimer, &QTimer::timeout, this, [this]() {
+        const QStringList failedHosts = m_siteChecks.keys();
+        for (const QString &host : failedHosts) {
+            if (m_siteChecks.value(host).state == CheckState::Failed) {
+                checkSite(host);
+            }
+        }
+        refreshCachedSiteIps(RouteMode::VpnOnlyForwardSites);
+        refreshCachedSiteIps(RouteMode::VpnAllExceptSites);
+    });
+    m_failedSitesRecheckTimer.start();
+    refreshCachedSiteIps(RouteMode::VpnOnlyForwardSites);
+    refreshCachedSiteIps(RouteMode::VpnAllExceptSites);
 }
 
 IpSplitTunnelingController::~IpSplitTunnelingController()
@@ -323,6 +339,42 @@ void IpSplitTunnelingController::processSiteAfterResolve(const QString &hostname
 void IpSplitTunnelingController::processSite(const QString &hostname, const QStringList &ips)
 {
     addSiteInternal(hostname, ips);
+}
+
+void IpSplitTunnelingController::refreshCachedSiteIps(RouteMode mode)
+{
+    if (!m_appSettingsRepository->isSitesSplitTunnelingEnabled()) {
+        return;
+    }
+    const QVariantMap sites = m_appSettingsRepository->vpnSites(mode);
+    for (auto it = sites.constBegin(); it != sites.constEnd(); ++it) {
+        const SplitTunnelRule rule = SplitTunnelRule::fromText(it.key());
+        if (rule.type() != SplitTunnelRule::Type::ExactHost) {
+            continue;
+        }
+        const QString host = rule.normalizedText();
+        if (!m_appSettingsRepository->siteIpList(it.value()).isEmpty()) {
+            continue;
+        }
+        const QString key = QString::number(static_cast<int>(mode)) + QChar('/') + host;
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        if (now - m_cacheIpLookupAt.value(key, 0) < 300000) {
+            continue;
+        }
+        m_cacheIpLookupAt[key] = now;
+        QHostInfo::lookupHost(host, this, [this, mode, host](const QHostInfo &info) {
+            QStringList ips;
+            for (const QHostAddress &addr : info.addresses()) {
+                if (addr.protocol() == QAbstractSocket::IPv4Protocol) {
+                    ips.append(addr.toString());
+                }
+            }
+            ips.removeDuplicates();
+            if (info.error() == QHostInfo::NoError && !ips.isEmpty()) {
+                m_appSettingsRepository->addVpnSite(mode, host, ips);
+            }
+        });
+    }
 }
 
 bool IpSplitTunnelingController::importSitesFromJson(const QByteArray& jsonData, bool replaceExisting, QString &errorMessage)
