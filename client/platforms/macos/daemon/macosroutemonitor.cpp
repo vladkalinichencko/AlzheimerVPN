@@ -210,7 +210,8 @@ void MacosRouteMonitor::handleRtmUpdate(const struct rt_msghdr* rtm,
   if (rtm->rtm_index == m_ifindex) {
     return;
   }
-  if ((rtm->rtm_pid == getpid()) && (rtm->rtm_type != RTM_GET)) {
+  const bool ownRoutingMessage = rtm->rtm_pid == getpid();
+  if ((rtm->rtm_type == RTM_GET) != ownRoutingMessage) {
     return;
   }
 
@@ -298,7 +299,7 @@ void MacosRouteMonitor::handleRtmUpdate(const struct rt_msghdr* rtm,
     if (prefix.address().protocol() == protocol) {
       logger.debug() << "Updating exclusion route to"
                      << prefix.toString();
-      rtmReplaceRoute(prefix, ifindex, addrlist[1].constData());
+      installExclusionRoute(prefix, ifindex, addrlist[1]);
     }
   }
   notifyPhysicalDefaultRouteChanged(wasReady);
@@ -433,7 +434,7 @@ void MacosRouteMonitor::rtmAppendAddr(struct rt_msghdr* rtm, size_t maxlen,
 
 bool MacosRouteMonitor::rtmSendRoute(int action, const IPAddress& prefix,
                                      unsigned int ifindex, const void* gateway,
-                                     int flags) {
+                                     int flags, bool allowExisting) {
   constexpr size_t rtm_max_size = sizeof(struct rt_msghdr) +
                                   sizeof(struct sockaddr_in6) * 2 +
                                   sizeof(struct sockaddr_storage);
@@ -506,29 +507,45 @@ bool MacosRouteMonitor::rtmSendRoute(int action, const IPAddress& prefix,
 
   // Send the routing message to the kernel.
   int len = write(m_rtsock, rtm, rtm->rtm_msglen);
+  const int routeError = len == rtm->rtm_msglen ? 0 : errno;
+  if (!m_ifname.isEmpty() && (ifindex == m_ifindex || routeError == EEXIST)) {
+    logger.info() << "NetTrace route write tunnel=" << m_ifname << "if_index=" << ifindex
+                  << "op=" << (action == RTM_ADD ? "add" : action == RTM_CHANGE ? "change" : "delete")
+                  << "family=" << prefix.address().protocol()
+                  << "prefix_length=" << plen << "errno=" << QString::number(routeError);
+  }
   if (len == rtm->rtm_msglen) {
     return true;
   }
-  if ((action == RTM_ADD) && (errno == EEXIST)) {
+  if (allowExisting && action == RTM_ADD && routeError == EEXIST) {
     return true;
   }
-  if ((action == RTM_DELETE) && (errno == ESRCH)) {
+  if ((action == RTM_DELETE) && (routeError == ESRCH)) {
     return true;
   }
-  if ((action == RTM_CHANGE) && (errno == ESRCH)) {
-    return false;
-  }
-  logger.warning() << "Failed to send routing message:" << strerror(errno);
+  logger.warning() << "Failed to send routing message:" << strerror(routeError);
   return false;
 }
 
-bool MacosRouteMonitor::rtmReplaceRoute(const IPAddress& prefix,
-                                        unsigned int ifindex,
-                                        const void* gateway) {
-  if (rtmSendRoute(RTM_CHANGE, prefix, ifindex, gateway)) {
-    return true;
+bool MacosRouteMonitor::installExclusionRoute(const IPAddress& prefix,
+                                              unsigned int ifindex,
+                                              const QByteArray& gateway) {
+  const auto destination = qMakePair(ifindex, gateway);
+  auto installed = m_installedExclusionRoutes.find(prefix);
+  if (installed != m_installedExclusionRoutes.end()) {
+    if (*installed == destination) {
+      return true;
+    }
+    if (!rtmSendRoute(RTM_DELETE, prefix, installed->first, installed->second.constData())) {
+      return false;
+    }
+    m_installedExclusionRoutes.erase(installed);
   }
-  return rtmSendRoute(RTM_ADD, prefix, ifindex, gateway);
+  if (!rtmSendRoute(RTM_ADD, prefix, ifindex, gateway.constData(), 0, false)) {
+    return false;
+  }
+  m_installedExclusionRoutes.insert(prefix, destination);
+  return true;
 }
 
 bool MacosRouteMonitor::rtmFetchRoutes(int family) {
@@ -657,7 +674,7 @@ bool MacosRouteMonitor::rtmFetchDefaultRoutes(int family) {
                    << addrToString(*gateway);
     for (const IPAddress& prefix : m_exclusionRoutes) {
       if (prefix.address().protocol() == protocol) {
-        rtmReplaceRoute(prefix, ifindex, gateway->constData());
+        installExclusionRoute(prefix, ifindex, *gateway);
       }
     }
     return true;
@@ -709,7 +726,7 @@ bool MacosRouteMonitor::addExclusionRoute(const IPAddress& prefix) {
     // Otherwise, the default route isn't known yet. Do nothing.
     return true;
   }
-  const bool ok = rtmReplaceRoute(prefix, ifindex, gateway->constData());
+  const bool ok = installExclusionRoute(prefix, ifindex, *gateway);
   if (!ok && isNew) {
     m_exclusionRoutes.removeAll(prefix);
   }
@@ -720,24 +737,22 @@ bool MacosRouteMonitor::deleteExclusionRoute(const IPAddress& prefix) {
   logger.debug() << "Deleting exclusion route for" << prefix.toString();
 
   m_exclusionRoutes.removeAll(prefix);
-  if (prefix.address().protocol() == QAbstractSocket::IPv4Protocol) {
-    return rtmSendRoute(RTM_DELETE, prefix, m_defaultIfindexIpv4, nullptr);
-  } else if (prefix.address().protocol() == QAbstractSocket::IPv6Protocol) {
-    return rtmSendRoute(RTM_DELETE, prefix, m_defaultIfindexIpv6, nullptr);
-  } else {
+  const auto installed = m_installedExclusionRoutes.find(prefix);
+  if (installed == m_installedExclusionRoutes.end()) {
+    return true;
+  }
+  if (!rtmSendRoute(RTM_DELETE, prefix, installed->first, installed->second.constData())) {
     return false;
   }
+  m_installedExclusionRoutes.erase(installed);
+  return true;
 }
 
 void MacosRouteMonitor::flushExclusionRoutes() {
-  while (!m_exclusionRoutes.isEmpty()) {
-    IPAddress prefix = m_exclusionRoutes.takeFirst();
-    if (prefix.address().protocol() == QAbstractSocket::IPv4Protocol) {
-      rtmSendRoute(RTM_DELETE, prefix, m_defaultIfindexIpv4, nullptr);
-    } else if (prefix.address().protocol() == QAbstractSocket::IPv6Protocol) {
-      rtmSendRoute(RTM_DELETE, prefix, m_defaultIfindexIpv6, nullptr);
-    }
+  for (const auto& prefix : m_installedExclusionRoutes.keys()) {
+    deleteExclusionRoute(prefix);
   }
+  m_exclusionRoutes.clear();
 }
 
 // static

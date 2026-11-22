@@ -33,6 +33,7 @@
 #endif
 
 #include "core/utils/networkUtilities.h"
+#include "core/utils/connectivityProbeTargets.h"
 #include "core/utils/containers/containerUtils.h"
 #include "core/utils/splitTunnelRoutePlanner.h"
 #include "core/utils/splitTunnelRule.h"
@@ -43,12 +44,6 @@ using namespace ProtocolUtils;
 
 namespace {
 constexpr int kMaxConnectedRecoveryAttempts = 3;
-const QStringList kConnectivityProbeHosts = {
-    QStringLiteral("1.1.1.1"),
-    QStringLiteral("1.0.0.1"),
-    QStringLiteral("8.8.8.8"),
-    QStringLiteral("9.9.9.9"),
-};
 // QRemoteObjectPendingReply waits 30 s by default; a dead helper must not stall the state machine that long.
 constexpr int kIpcReplyTimeoutMsecs = 5000;
 
@@ -1671,6 +1666,9 @@ void VpnConnection::startConnectivityProbeAttempt()
     auto *socket = new QTcpSocket(this);
     m_connectivityProbe.reset(socket);
     m_connectivityProbeStartedMs = QDateTime::currentMSecsSinceEpoch();
+    qInfo() << "Connectivity probe started target=" << m_connectivityProbeHost
+            << "index=" << m_connectivityProbeTarget + 1
+            << "consecutive_failed_sweeps=" << m_consecutiveProbeFailures;
 
     connect(socket, &QTcpSocket::connected, this, [this]() {
         const qint64 connectMs = QDateTime::currentMSecsSinceEpoch() - m_connectivityProbeStartedMs;

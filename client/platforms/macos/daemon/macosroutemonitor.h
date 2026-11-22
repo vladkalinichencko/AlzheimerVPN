@@ -7,6 +7,7 @@
 
 #include <QByteArray>
 #include <QHostAddress>
+#include <QHash>
 #include <QList>
 #include <QObject>
 #include <QSocketNotifier>
@@ -44,9 +45,9 @@ class MacosRouteMonitor final : public QObject {
   void handleRtmUpdate(const struct rt_msghdr* msg, const QByteArray& payload);
   void handleIfaceInfo(const struct if_msghdr* msg, const QByteArray& payload);
   bool rtmSendRoute(int action, const IPAddress& prefix, unsigned int ifindex,
-                    const void* gateway, int flags = 0);
-  bool rtmReplaceRoute(const IPAddress& prefix, unsigned int ifindex,
-                       const void* gateway);
+                    const void* gateway, int flags = 0, bool allowExisting = true);
+  bool installExclusionRoute(const IPAddress& prefix, unsigned int ifindex,
+                             const QByteArray& gateway);
   bool rtmFetchRoutes(int family);
   bool rtmFetchDefaultRoutes(int family);
   static void rtmAppendAddr(struct rt_msghdr* rtm, size_t maxlen, int rtaddr,
@@ -61,6 +62,7 @@ class MacosRouteMonitor final : public QObject {
   static QString addrToString(const QByteArray& data);
 
   QList<IPAddress> m_exclusionRoutes;
+  QHash<IPAddress, QPair<unsigned int, QByteArray>> m_installedExclusionRoutes;
   QByteArray m_defaultGatewayIpv4;
   QByteArray m_defaultGatewayIpv6;
   unsigned int m_defaultIfindexIpv4 = 0;

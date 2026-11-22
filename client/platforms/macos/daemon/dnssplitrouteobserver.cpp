@@ -99,6 +99,14 @@ bool DnsSplitRouteObserver::start(const QList<QHostAddress> &upstreamServers)
 
 void DnsSplitRouteObserver::stop()
 {
+    if (m_traffic.queries || m_traffic.rejectedReplies) {
+        logger.info() << "NetTrace DNS proxy queries=" << m_traffic.queries
+                      << "forwarded=" << m_traffic.forwarded << "send_errors=" << m_traffic.sendErrors
+                      << "replies=" << m_traffic.replies << "rejected_replies=" << m_traffic.rejectedReplies
+                      << "client_send_errors=" << m_traffic.clientSendErrors
+                      << "pending=" << QString::number(m_pendingQueries.size());
+    }
+    m_traffic = {};
     m_replyTimer.stop();
     m_clientSocket.close();
     m_upstreamSocket.close();
@@ -120,6 +128,7 @@ void DnsSplitRouteObserver::readClientDatagrams()
         QByteArray request;
         request.resize(int(m_clientSocket.pendingDatagramSize()));
         m_clientSocket.readDatagram(request.data(), request.size(), &clientAddress, &clientPort);
+        ++m_traffic.queries;
 
         const QString host = DnsMessageParser::queryHost(request);
         if (host.isEmpty() || m_upstreamServers.isEmpty()) {
@@ -151,7 +160,11 @@ void DnsSplitRouteObserver::readClientDatagrams()
             const quint16 forwardedId = nextQueryId();
             setMessageId(forwardedRequest, forwardedId);
             if (m_upstreamSocket.writeDatagram(forwardedRequest, upstream, 53) == forwardedRequest.size()) {
+                ++m_traffic.forwarded;
                 m_pendingQueries.insert(forwardedId, pending);
+            } else if (++m_traffic.sendErrors <= 4) {
+                logger.warning() << "NetTrace DNS upstream send failed error=" << m_upstreamSocket.error()
+                                 << m_upstreamSocket.errorString();
             }
         }
     }
@@ -169,9 +182,13 @@ void DnsSplitRouteObserver::readUpstreamDatagrams()
         const quint16 forwardedId = messageId(response);
         if (senderPort != 53 || !m_upstreamServers.contains(sender) ||
             !m_pendingQueries.contains(forwardedId)) {
+            ++m_traffic.rejectedReplies;
             continue;
         }
 
+        if (++m_traffic.replies == 1) {
+            logger.info() << "NetTrace DNS proxy received first upstream reply after sends=" << m_traffic.forwarded;
+        }
         m_replyTimer.stop();
         const PendingQuery pending = m_pendingQueries.take(forwardedId);
         for (auto it = m_pendingQueries.begin(); it != m_pendingQueries.end();) {
@@ -191,7 +208,9 @@ void DnsSplitRouteObserver::readUpstreamDatagrams()
         }
 
         setMessageId(response, pending.originalId);
-        m_clientSocket.writeDatagram(response, pending.clientAddress, pending.clientPort);
+        if (m_clientSocket.writeDatagram(response, pending.clientAddress, pending.clientPort) != response.size()) {
+            ++m_traffic.clientSendErrors;
+        }
     }
 }
 

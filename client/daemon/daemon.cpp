@@ -143,9 +143,11 @@ bool Daemon::activate(const InterfaceConfig& config) {
   // Bring the interface up.
   if (supportIPUtils()) {
     if (!iputils()->addInterfaceIPs(config)) {
+      logger.error() << "VPN activation failed while assigning tunnel addresses";
       return false;
     }
     if (!iputils()->setMTUAndUp(config)) {
+      logger.error() << "VPN activation failed while bringing the interface up";
       return false;
     }
   }
@@ -157,6 +159,7 @@ bool Daemon::activate(const InterfaceConfig& config) {
   }
 
   if (!maybeUpdateResolvers(config)) {
+    logger.error() << "VPN activation failed while configuring DNS";
     return false;
   }
 
@@ -670,8 +673,6 @@ void Daemon::checkHandshake() {
     if (connection.m_date.isValid()) {
       continue;
     }
-    logger.debug() << "awaiting" << config.m_serverPublicKey;
-
     // Check if the handshake has completed.
     for (const WireguardUtils::PeerStatus& status : peers) {
       if (!peerKeysMatch(config.m_serverPublicKey, status.m_pubkey)) {
@@ -679,6 +680,9 @@ void Daemon::checkHandshake() {
       }
       if (status.m_handshake != 0) {
         connection.m_date.setMSecsSinceEpoch(status.m_handshake);
+        logger.info() << "VPN handshake tunnel=" << wgutils()->interfaceName()
+                      << "rx_bytes=" << QString::number(status.m_rxBytes)
+                      << "tx_bytes=" << QString::number(status.m_txBytes);
         emit connected(status.m_pubkey);
         configureSplitTunnelDnsRoutes(config);
         refreshSplitTunnelStaticRoutes(config.m_excludedAddresses);

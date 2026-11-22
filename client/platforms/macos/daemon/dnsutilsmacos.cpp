@@ -77,6 +77,8 @@ DnsUtilsMacos::DnsUtilsMacos(QObject* parent) : DnsUtils(parent) {
     if (applyResolvers(addressStrings(m_currentResolvers))) {
       m_splitRouteObserver.stop();
       logger.warning() << "DNS split observer stopped after upstream timeout; restored direct DNS";
+    } else {
+      logger.error() << "NetTrace upstream timeout; direct DNS fallback failed";
     }
   });
 }
@@ -239,8 +241,13 @@ bool DnsUtilsMacos::applyResolvers(const QStringList& resolverList) {
     CFRelease(dnsPath);
   }
   if (!SCDynamicStoreSetMultiple(m_scStore, updates, nullptr, nullptr)) {
+    logger.error() << "NetTrace DNS update rejected sc_error=" << QString::number(SCError());
     return false;
   }
+  logger.info() << "NetTrace DNS applied mode="
+                << (resolverList == QStringList{QStringLiteral("127.0.0.1")} ? "loopback" : "direct")
+                << "services=" << QString::number(CFDictionaryGetCount(updates))
+                << "servers=" << QString::number(resolverList.size());
   flushSystemDns();
   return true;
 }

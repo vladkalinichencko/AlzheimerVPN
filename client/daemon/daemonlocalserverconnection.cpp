@@ -129,7 +129,11 @@ void DaemonLocalServerConnection::parseCommand(const QByteArray& data) {
   }
 
   if (type == "deactivate") {
-    Daemon::instance()->deactivate(true);
+    const QPointer<DaemonLocalServerConnection> requester(this);
+    Daemon::instance()->deactivate(false);
+    if (requester) {
+      requester->disconnected();
+    }
     return;
   }
 

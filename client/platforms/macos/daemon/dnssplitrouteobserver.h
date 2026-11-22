@@ -51,6 +51,14 @@ private:
     QList<amnezia::SplitTunnelRule> m_rules;
     QHash<quint16, PendingQuery> m_pendingQueries;
     quint16 m_nextQueryId = 1;
+    struct Traffic {
+        quint64 queries = 0;
+        quint64 forwarded = 0;
+        quint64 sendErrors = 0;
+        quint64 replies = 0;
+        quint64 rejectedReplies = 0;
+        quint64 clientSendErrors = 0;
+    } m_traffic;
 };
 
 #endif // DNSSPLITROUTEOBSERVER_H
