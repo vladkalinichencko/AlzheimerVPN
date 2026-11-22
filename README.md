@@ -45,11 +45,11 @@ The site list for "VPN only for listed sites" describes traffic that must never 
 On macOS, AlzheimerVPN keeps those sites blocked while the app is running, including when the VPN is off and whichever site split-tunneling mode is selected.
 
 - The block applies only when both the kill switch and site split tunneling are enabled and the "VPN only for listed sites" list is not empty.
-- It uses the saved addresses and fixed IP/subnet entries of that list, the same data the connected kill switch uses. It refreshes when the list or either switch changes and when the app starts.
-- Without the VPN, the service blocks only those addresses and still passes tunnel interfaces. It does not block DNS or IPv6, so the rest of the network keeps working.
+- It uses the saved IPv4 addresses and fixed IP/subnet entries from that list. The app refreshes cached host addresses while the VPN is connected and sends the saved list when the app starts or the service reconnects.
+- With the VPN off, the service blocks those addresses on every interface and lets other traffic through.
 - During a connection, the usual kill-switch rules take over. When the connection ends, the service returns to the block.
-- The block ends when the app closes or loses its connection to the service. Strict kill switch mode already blocks everything and ignores the list.
-- Only IPv4 addresses are covered. Subnet masks are dropped as in site routes, and wildcard hostnames are blocked only through addresses already saved for them.
+- The service removes the app's firewall rules when the last client disconnects. Strict kill switch mode blocks all traffic while the app is open and the VPN is off.
+- Wildcard hostnames are covered by the addresses already saved for them.
 
 ### 🩺 Diagnostics For Stuck Or Broken Connections
 
@@ -240,4 +240,4 @@ ls -l /Applications/AlzheimerVPN.app/Contents/MacOS/amneziawg-go \
 
 The fork merges upstream `5.0.3.0`. [The maintenance notes](notes/fork-maintenance.md) track hostname split tunneling, diagnostics, service isolation, and ARM64 packaging. With AmneziaDNS off, configured DNS resolvers use direct routes so the Premium server cannot redirect queries to its AdGuard resolver.
 
-With kill switch enabled on macOS, the connection owns protection from tunnel startup until an explicit disconnect. Protocol cleanup keeps the firewall rules active during automatic recovery and after a failed attempt. Configured split-tunnel exceptions still permit direct traffic. Strict kill switch also blocks traffic after an explicit disconnect.
+With kill switch enabled on macOS, connection protection starts before the tunnel and stays active during automatic recovery. After a manual disconnect or terminal failure, the service applies the saved VPN-only list. Strict kill switch mode continues to block all traffic until the app quits.

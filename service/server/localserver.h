@@ -54,6 +54,9 @@ public:
 #ifdef Q_OS_MAC
     DaemonLocalServer server{qApp};
     MacOSDaemon daemon;
+
+private:
+    void cleanupClientSession();
 #endif
 };
 

@@ -72,6 +72,7 @@ public:
             });
     }
 signals:
+    void serviceAvailable();
 
 private:
     QRemoteObjectNode m_node;

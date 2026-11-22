@@ -36,7 +36,7 @@ class DnsUtilsMacos final : public DnsUtils {
   void backupResolvers();
   void backupService(const QString& uuid);
   void removeStaleLocalResolverOverrides();
-  QList<QHostAddress> backedUpResolvers() const;
+  bool applyResolvers(const QStringList& resolvers);
 
  private:
   class DnsBackup {

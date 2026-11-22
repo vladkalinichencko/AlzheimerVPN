@@ -35,6 +35,21 @@ void IpcServer::setNetworkWatcher(NetworkWatcher* networkWatcher)
     m_networkWatcher = networkWatcher;
 }
 
+#ifdef Q_OS_MACOS
+void IpcServer::cleanupClientSession()
+{
+    for (const auto &process : std::as_const(m_processes)) {
+        process.ipcProcess->close();
+    }
+    m_processes.clear();
+    Xray::getInstance().stopAny();
+    Router::configureDnsSplitTunnel({}, {}, false);
+    Router::restoreResolvers();
+    Router::clearSavedRoutes();
+    m_pingHelper.stop();
+}
+#endif
+
 int IpcServer::createPrivilegedProcess()
 {
 #ifdef MZ_DEBUG

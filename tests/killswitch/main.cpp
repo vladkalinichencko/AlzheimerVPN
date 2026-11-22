@@ -83,8 +83,8 @@ int main(int argc, char **argv)
     check(!killSwitch->setAlwaysBlockedSites({"not-an-ip"}), "invalid always-blocked site was accepted");
     check(!installed, "invalid always-blocked site touched the firewall");
     check(killSwitch->setAlwaysBlockedSites({"203.0.113.77", "198.51.100.0/24"}), "always-blocked sites did not arm");
-    check(installed && anchors.contains("120.blockNets") && anchors.contains("200.allowVPN")
-          && !anchors.contains("100.blockAll"), "idle block changed ordinary traffic");
+    check(installed && anchors == QSet<QString>({"000.allowLoopback", "120.blockNets"}),
+          "idle blocking must apply to listed addresses on every interface");
     check(blocked == QStringList({"203.0.113.77", "198.51.100.0/24"}), "idle block table is wrong");
     check(killSwitch->setConnectionProtection(true, config), "protection failed with always-blocked sites");
     check(anchors.contains("100.blockAll") && !anchors.contains("120.blockNets"),
@@ -100,10 +100,19 @@ int main(int argc, char **argv)
     check(killSwitch->setAlwaysBlockedSites({}), "release failed");
     check(!installed, "release kept the firewall installed");
 
+    check(killSwitch->setAlwaysBlockedSites({"203.0.113.77"}), "idle list setup failed");
+    check(killSwitch->setConnectionProtection(true, config), "connection setup before quit failed");
+    killSwitch->endClientSession();
+    check(!installed && anchors.isEmpty(), "app quit kept connection protection");
+    killSwitch->disableKillSwitch();
+    check(!installed, "protocol cleanup restored the exited client's list");
+
     strict = true;
     killSwitch->setConnectionProtection(true, config);
     killSwitch->setConnectionProtection(false, {});
     check(installed && anchors.contains("100.blockAll"), "manual disconnect bypassed strict protection");
+    killSwitch->endClientSession();
+    check(!installed && anchors.isEmpty(), "strict protection survived app quit");
     strict = false;
     killSwitch->disableKillSwitch();
 

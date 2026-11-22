@@ -40,10 +40,18 @@ LocalServer::LocalServer(QObject *parent) : QObject(parent),
         qDebug() << "LocalServer new connection";
         QLocalSocket *socket = m_server->nextPendingConnection();
         ++m_clientCount;
-        // The always-blocked sites only hold while the app is alive, so a crash releases them too.
+#ifdef Q_OS_MAC
+        if (m_clientCount == 1 && KillSwitch::instance()->isStrictKillSwitchEnabled()) {
+            KillSwitch::instance()->disableAllTraffic();
+        }
+#endif
         connect(socket, &QLocalSocket::disconnected, this, [this]() {
             if (--m_clientCount == 0) {
+#ifdef Q_OS_MAC
+                cleanupClientSession();
+#else
                 KillSwitch::instance()->setAlwaysBlockedSites({});
+#endif
             }
         });
         m_serverNode.addHostSideConnection(socket);
@@ -75,9 +83,7 @@ LocalServer::LocalServer(QObject *parent) : QObject(parent),
 #endif
 
 #ifdef Q_OS_MAC
-    // Signal handling for a proper shutdown.
-    QObject::connect(qApp, &QCoreApplication::aboutToQuit,
-                     []() { MacOSDaemon::instance()->deactivate(); });
+    connect(qApp, &QCoreApplication::aboutToQuit, this, &LocalServer::cleanupClientSession);
 #endif
 
 #ifdef Q_OS_WIN
@@ -86,6 +92,15 @@ LocalServer::LocalServer(QObject *parent) : QObject(parent),
                      []() { WindowsDaemon::instance()->deactivate(); });
 #endif
 }
+
+#ifdef Q_OS_MAC
+void LocalServer::cleanupClientSession()
+{
+    daemon.deactivate(false);
+    m_ipcServer.cleanupClientSession();
+    KillSwitch::instance()->endClientSession();
+}
+#endif
 
 LocalServer::~LocalServer()
 {

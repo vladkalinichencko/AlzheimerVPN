@@ -58,6 +58,7 @@ static QString kRootAnchor = QStringLiteral(SERVICE_NAME) == QStringLiteral("Amn
     : QStringLiteral(FORK_BRAND_IDENTIFIER);
 static QString kPfFileBase = QStringLiteral(BRAND_IDENTIFIER);
 static QByteArray kPfWarning = "pfctl: Use of -f option, could result in flushing of rules\npresent in the main ruleset added by the system at startup.\nSee /etc/pf.conf for further details.\n";
+static constexpr auto kRootFilterPattern = R"(^anchor "%1(/\*)?"( |$))";
 
 static bool isDefaultApplication()
 {
@@ -120,10 +121,11 @@ void MacOSFirewall::installRootAnchors()
     // due to -R.
     auto insertFilterAnchor = QStringLiteral(
         "( "
-        R"(pfctl -sr | grep -v '%1/*'; )"   // Filter rules (everything from pfctl -sr except 'scrub')
-        R"(echo 'anchor "%2/*"'; )"         // PIA's filter anchors
+        R"(pfctl -sr | grep -Ev '%1'; )"   // Filter rules (everything from pfctl -sr except 'scrub')
+        R"(echo 'anchor "%2"'; )"         // PIA's filter anchors
         R"(echo 'load anchor "%3" from "%4/%5.conf"'; )" // Load the PIA anchors from file
-        " ) | pfctl -R -f -").arg(kRootAnchor, kRootAnchor, kRootAnchor, ResourceDir, kPfFileBase);
+        " ) | pfctl -R -f -").arg(QString::fromLatin1(kRootFilterPattern).arg(kRootAnchor),
+                                   kRootAnchor, kRootAnchor, ResourceDir, kPfFileBase);
     execute(insertFilterAnchor);
 }
 
@@ -151,11 +153,22 @@ void MacOSFirewall::uninstall()
 {
     logger.info() << "Uninstalling PF root anchor";
 
-    execute(QStringLiteral("pfctl -q -a '%1' -F all").arg(kRootAnchor));
-    execute(QStringLiteral("test -f '%1/pf.token' && pfctl -X `cat '%1/pf.token'` && rm '%1/pf.token'").arg(daemonDataDir()));
     if (isDefaultApplication()) {
+        execute(QStringLiteral("pfctl -q -a '%1' -F all").arg(kRootAnchor));
         execute(QStringLiteral("test -f /etc/pf.conf && pfctl -F all -f /etc/pf.conf"));
+    } else {
+        execute(QStringLiteral(
+            R"(rules=$(pfctl -sr) || exit $?; )"
+            R"(if grep -Eq '%1' <<< "$rules"; then )"
+            R"((grep -Ev '%1' <<< "$rules" || :) | pfctl -R -f -; fi)")
+            .arg(QString::fromLatin1(kRootFilterPattern).arg(kRootAnchor)));
+        execute(QStringLiteral(
+            R"(for file in '%2'/%3.*.conf; do )"
+            R"(name=${file##*/}; name=${name#%3.}; )"
+            R"(pfctl -q -a "%1/${name%.conf}" -F rules; done; )"
+            R"(pfctl -q -a '%1' -F rules)").arg(kRootAnchor, ResourceDir, kPfFileBase));
     }
+    execute(QStringLiteral("test -f '%1/pf.token' && pfctl -X `cat '%1/pf.token'` && rm '%1/pf.token'").arg(daemonDataDir()));
 }
 
 bool MacOSFirewall::isInstalled()
@@ -172,7 +185,11 @@ void MacOSFirewall::ensureRootAnchorPriority()
 {
     // We check whether our anchor appears last in the ruleset. If it does not, then remove it and re-add it last (this happens atomically).
     // Appearing last ensures priority.
-    execute(QStringLiteral("if ! pfctl -sr | tail -1 | grep -qF '%1'; then echo -e \"$(pfctl -sr | grep -vF '%1')\\n\"'anchor \"%1\"' | pfctl -f - ; fi").arg(kRootAnchor));
+    execute(QStringLiteral(
+        R"(rules=$(pfctl -sr) || exit $?; )"
+        R"(if ! tail -1 <<< "$rules" | grep -Fxq 'anchor "%1"'; then )"
+        R"((grep -Ev '%2' <<< "$rules"; echo 'anchor "%1"') | pfctl -R -f -; fi)")
+        .arg(kRootAnchor, QString::fromLatin1(kRootFilterPattern).arg(kRootAnchor)));
 }
 
 bool MacOSFirewall::isRootAnchorLoaded()
@@ -180,17 +197,18 @@ bool MacOSFirewall::isRootAnchorLoaded()
     // Our Root anchor is loaded if:
     // 1. It is is included among the top-level anchors
     // 2. It is not empty (i.e it contains sub-anchors)
-    return 0 == execute(QStringLiteral("pfctl -sr | grep -q '%1' && pfctl -q -a '%1' -s rules 2> /dev/null | grep -q .").arg(kRootAnchor), true);
+    return 0 == execute(QStringLiteral("pfctl -sr | grep -Eq '%2' && pfctl -q -a '%1' -s rules 2> /dev/null | grep -q .")
+        .arg(kRootAnchor, QString::fromLatin1(kRootFilterPattern).arg(kRootAnchor)), true);
 }
 
 void MacOSFirewall::enableAnchor(const QString& anchor)
 {
-    execute(QStringLiteral("if pfctl -q -a '%1/%2' -s rules 2> /dev/null | grep -q . ; then echo '%2: ON' ; else echo '%2: OFF -> ON' ; pfctl -q -a '%1/%2' -F all -f '%3/%4.%2.conf' ; fi").arg(kRootAnchor, anchor, ResourceDir, kPfFileBase));
+    execute(QStringLiteral("if pfctl -q -a '%1/%2' -s rules 2> /dev/null | grep -q . ; then echo '%2: ON' ; else echo '%2: OFF -> ON' ; pfctl -q -a '%1/%2' -f '%3/%4.%2.conf' ; fi").arg(kRootAnchor, anchor, ResourceDir, kPfFileBase));
 }
 
 void MacOSFirewall::disableAnchor(const QString& anchor)
 {
-    execute(QStringLiteral("if ! pfctl -q -a '%1/%2' -s rules 2> /dev/null | grep -q . ; then echo '%2: OFF' ; else echo '%2: ON -> OFF' ; pfctl -q -a '%1/%2' -F all ; fi").arg(kRootAnchor, anchor));
+    execute(QStringLiteral("if ! pfctl -q -a '%1/%2' -s rules 2> /dev/null | grep -q . ; then echo '%2: OFF' ; else echo '%2: ON -> OFF' ; pfctl -q -a '%1/%2' -F rules ; fi").arg(kRootAnchor, anchor));
 }
 
 bool MacOSFirewall::isAnchorEnabled(const QString& anchor)

@@ -28,7 +28,6 @@ IpSplitTunnelingController::IpSplitTunnelingController(SecureAppSettingsReposito
         refreshCachedSiteIps(RouteMode::VpnAllExceptSites);
     });
     m_failedSitesRecheckTimer.start();
-    refreshCachedSiteIps(RouteMode::VpnOnlyForwardSites);
     refreshCachedSiteIps(RouteMode::VpnAllExceptSites);
 }
 
@@ -341,9 +340,18 @@ void IpSplitTunnelingController::processSite(const QString &hostname, const QStr
     addSiteInternal(hostname, ips);
 }
 
+void IpSplitTunnelingController::setVpnConnected(bool connected)
+{
+    m_vpnConnected = connected;
+    if (connected) {
+        refreshCachedSiteIps(RouteMode::VpnOnlyForwardSites);
+    }
+}
+
 void IpSplitTunnelingController::refreshCachedSiteIps(RouteMode mode)
 {
-    if (!m_appSettingsRepository->isSitesSplitTunnelingEnabled()) {
+    const bool vpnOnly = mode == RouteMode::VpnOnlyForwardSites;
+    if (!m_appSettingsRepository->isSitesSplitTunnelingEnabled() || (vpnOnly && !m_vpnConnected)) {
         return;
     }
     const QVariantMap sites = m_appSettingsRepository->vpnSites(mode);
@@ -353,7 +361,7 @@ void IpSplitTunnelingController::refreshCachedSiteIps(RouteMode mode)
             continue;
         }
         const QString host = rule.normalizedText();
-        if (!m_appSettingsRepository->siteIpList(it.value()).isEmpty()) {
+        if (!vpnOnly && !m_appSettingsRepository->siteIpList(it.value()).isEmpty()) {
             continue;
         }
         const QString key = QString::number(static_cast<int>(mode)) + QChar('/') + host;
@@ -362,7 +370,10 @@ void IpSplitTunnelingController::refreshCachedSiteIps(RouteMode mode)
             continue;
         }
         m_cacheIpLookupAt[key] = now;
-        QHostInfo::lookupHost(host, this, [this, mode, host](const QHostInfo &info) {
+        QHostInfo::lookupHost(host, this, [this, mode, host, vpnOnly](const QHostInfo &info) {
+            if ((vpnOnly && !m_vpnConnected) || !m_appSettingsRepository->vpnSites(mode).contains(host)) {
+                return;
+            }
             QStringList ips;
             for (const QHostAddress &addr : info.addresses()) {
                 if (addr.protocol() == QAbstractSocket::IPv4Protocol) {

@@ -20,6 +20,9 @@ class IpcServer : public IpcInterfaceSource
 public:
     explicit IpcServer(QObject *parent = nullptr);
     void setNetworkWatcher(NetworkWatcher* networkWatcher);
+#ifdef Q_OS_MACOS
+    void cleanupClientSession();
+#endif
     virtual int createPrivilegedProcess() override;
 
     virtual int routeAddList(const QString &gw, const QStringList &ips) override;

@@ -48,6 +48,7 @@ public:
     QByteArray exportSitesToJson() const;
     SiteCheck siteCheck(const QString &hostname) const;
     void checkSite(const QString &hostname);
+    void setVpnConnected(bool connected);
 
 signals:
     void siteCheckChanged(const QString &hostname);
@@ -71,6 +72,7 @@ private:
     QMap<QString, SiteCheck> m_siteChecks;
     QMap<QString, qint64> m_cacheIpLookupAt;
     QTimer m_failedSitesRecheckTimer;
+    bool m_vpnConnected = false;
 };
 
 #endif // IPSPLITTUNNELINGCONTROLLER_H

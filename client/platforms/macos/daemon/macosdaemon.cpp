@@ -33,6 +33,12 @@ MacOSDaemon::MacOSDaemon() : Daemon(nullptr) {
   m_iputils = new IPUtilsMacos(this);
   connect(m_dnsutils, &DnsUtils::splitTunnelHostResolved,
           this, &MacOSDaemon::onSplitTunnelHostResolved);
+  connect(m_wgutils, &WireguardUtilsMacos::backendFailure, this, [this] {
+    if (!m_connections.isEmpty() && !m_wgutils->interfaceExists()) {
+      deactivate(false);
+      emit backendFailure();
+    }
+  }, Qt::QueuedConnection);
 
   Q_ASSERT(s_daemon == nullptr);
   s_daemon = this;

@@ -8,7 +8,6 @@
 #include <systemconfiguration/scpreferences.h>
 
 #include <QScopeGuard>
-#include <QAbstractSocket>
 #include <QProcess>
 
 #include "leakdetector.h"
@@ -74,6 +73,12 @@ DnsUtilsMacos::DnsUtilsMacos(QObject* parent) : DnsUtils(parent) {
             emit splitTunnelHostResolved(host, ips);
             emit splitTunnelHostResolvedWithTtl(host, answers);
           });
+  connect(&m_splitRouteObserver, &DnsSplitRouteObserver::upstreamUnavailable, this, [this] {
+    if (applyResolvers(addressStrings(m_currentResolvers))) {
+      m_splitRouteObserver.stop();
+      logger.warning() << "DNS split observer stopped after upstream timeout; restored direct DNS";
+    }
+  });
 }
 
 DnsUtilsMacos::~DnsUtilsMacos() {
@@ -180,21 +185,18 @@ bool DnsUtilsMacos::updateResolvers(const QString& ifname,
                                     const QList<QHostAddress>& resolvers) {
   Q_UNUSED(ifname);
   m_currentResolvers = resolvers;
-  QStringList resolverList;
-  for (const QHostAddress& addr : resolvers) {
-    resolverList.append(addr.toString());
-  }
-
-  const QList<QHostAddress> matchedResolvers = backedUpResolvers();
-  if (m_splitRouteObserver.start(resolvers, matchedResolvers)) {
-    logger.info() << "DNS split route observer enabled with upstream resolvers"
-                   << resolverList
-                   << "matched upstream resolvers" << addressStrings(matchedResolvers);
-    resolverList = QStringList{QStringLiteral("127.0.0.1")};
-  } else {
+  if (m_splitRouteObserver.start(resolvers)) {
+    if (applyResolvers({QStringLiteral("127.0.0.1")})) {
+      return true;
+    }
     m_splitRouteObserver.stop();
-    logger.info() << "DNS split route observer disabled; using resolvers"
-                   << resolverList;
+  }
+  return applyResolvers(addressStrings(resolvers));
+}
+
+bool DnsUtilsMacos::applyResolvers(const QStringList& resolverList) {
+  if (!m_scStore) {
+    return false;
   }
 
   // Get the list of current network services.
@@ -212,6 +214,10 @@ bool DnsUtilsMacos::updateResolvers(const QString& ifname,
   auto configGuard = qScopeGuard([&] { CFRelease(dnsConfig); });
   cfDictSetStringList(dnsConfig, kSCPropNetDNSServerAddresses, resolverList);
   cfDictSetString(dnsConfig, kSCPropNetDNSDomainName, localResolverDomain());
+  CFMutableDictionaryRef updates = CFDictionaryCreateMutable(
+      kCFAllocatorSystemDefault, 0, &kCFCopyStringDictionaryKeyCallBacks,
+      &kCFTypeDictionaryValueCallBacks);
+  auto updatesGuard = qScopeGuard([&] { CFRelease(updates); });
 
   // Backup each network service's DNS config, and replace it with ours.
   for (CFIndex i = 0; i < CFArrayGetCount(netServices); i++) {
@@ -229,8 +235,11 @@ bool DnsUtilsMacos::updateResolvers(const QString& ifname,
     if (!dnsPath) {
       continue;
     }
-    SCDynamicStoreSetValue(m_scStore, dnsPath, dnsConfig);
+    CFDictionarySetValue(updates, dnsPath, dnsConfig);
     CFRelease(dnsPath);
+  }
+  if (!SCDynamicStoreSetMultiple(m_scStore, updates, nullptr, nullptr)) {
+    return false;
   }
   flushSystemDns();
   return true;
@@ -239,6 +248,9 @@ bool DnsUtilsMacos::updateResolvers(const QString& ifname,
 bool DnsUtilsMacos::restoreResolvers() {
   m_splitRouteObserver.stop();
   m_currentResolvers.clear();
+  if (m_prevServices.isEmpty()) {
+    return true;
+  }
 
   for (const QString& uuid : m_prevServices.keys()) {
     CFStringRef path = CFStringCreateWithFormat(
@@ -270,20 +282,6 @@ bool DnsUtilsMacos::restoreResolvers() {
   removeStaleLocalResolverOverrides();
   flushSystemDns();
   return true;
-}
-
-QList<QHostAddress> DnsUtilsMacos::backedUpResolvers() const {
-  QList<QHostAddress> result;
-  for (const DnsBackup& backup : m_prevServices) {
-    for (const QString& server : backup.m_servers) {
-      const QHostAddress address(server);
-      if (address.protocol() == QAbstractSocket::IPv4Protocol &&
-          address != QHostAddress::LocalHost && !result.contains(address)) {
-        result.append(address);
-      }
-    }
-  }
-  return result;
 }
 
 void DnsUtilsMacos::backupService(const QString& uuid) {

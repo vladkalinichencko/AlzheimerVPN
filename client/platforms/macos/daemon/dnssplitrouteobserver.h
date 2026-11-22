@@ -5,6 +5,7 @@
 #include <QHostAddress>
 #include <QObject>
 #include <QStringList>
+#include <QTimer>
 #include <QUdpSocket>
 
 #include "core/utils/dnsMessageParser.h"
@@ -18,13 +19,13 @@ public:
     explicit DnsSplitRouteObserver(QObject *parent = nullptr);
 
     void setRules(const QStringList &rules);
-    bool start(const QList<QHostAddress> &upstreamServers,
-               const QList<QHostAddress> &matchedUpstreamServers);
+    bool start(const QList<QHostAddress> &upstreamServers);
     void stop();
     bool isActive() const;
 
 signals:
     void hostResolved(const QString &host, const QList<amnezia::DnsIpv4Answer> &answers);
+    void upstreamUnavailable();
 
 private slots:
     void readClientDatagrams();
@@ -45,8 +46,8 @@ private:
 
     QUdpSocket m_clientSocket;
     QUdpSocket m_upstreamSocket;
+    QTimer m_replyTimer;
     QList<QHostAddress> m_upstreamServers;
-    QList<QHostAddress> m_matchedUpstreamServers;
     QList<amnezia::SplitTunnelRule> m_rules;
     QHash<quint16, PendingQuery> m_pendingQueries;
     quint16 m_nextQueryId = 1;

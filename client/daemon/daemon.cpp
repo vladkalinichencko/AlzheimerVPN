@@ -513,25 +513,19 @@ bool Daemon::deactivate(bool emitSignals) {
     }
   }
 
-  if (emitSignals) {
-    emit disconnected();
-  }
-
   // Tear down the daemon-side split-tunnel DNS pipeline before restoring
   // resolvers so its routes are removed and in-flight resolves are obsoleted.
   m_splitTunnelDnsKillSwitchEnabled = false;
+  m_handshakeTimer.stop();
   ++m_splitTunnelDnsGeneration;
   resetSplitTunnelDnsRetry();
   clearSplitTunnelDnsRoutes();
   m_splitTunnelDnsResolveHosts.clear();
-  if (dnsutils()) {
-    dnsutils()->configureSplitTunnelRules(QStringList());
-  }
-
   // Cleanup DNS
   if (!dnsutils()->restoreResolvers()) {
     logger.warning() << "Failed to restore DNS resolvers.";
   }
+  dnsutils()->configureSplitTunnelRules({});
 
   // Cleanup peers and routing
   for (const ConnectionState& state : m_connections) {
@@ -551,8 +545,11 @@ bool Daemon::deactivate(bool emitSignals) {
   m_excludedAddrSet.clear();
 
   m_connections.clear();
-  // Delete the interface
-  return wgutils()->deleteInterface();
+  const bool deleted = wgutils()->deleteInterface();
+  if (emitSignals) {
+    emit disconnected();
+  }
+  return deleted;
 }
 
 QString Daemon::logs() {

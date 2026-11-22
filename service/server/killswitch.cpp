@@ -61,9 +61,15 @@ bool KillSwitch::init()
     m_appSettigns = QSharedPointer<SecureQSettings>(new SecureQSettings(ORGANIZATION_NAME, APPLICATION_NAME, nullptr));
 #endif
 
+#ifdef Q_OS_MACOS
+    if (MacOSFirewall::isInstalled()) {
+        MacOSFirewall::uninstall();
+    }
+#else
     if (isStrictKillSwitchEnabled()) {
         return disableAllTraffic();
     }
+#endif
 
     return true;
 }
@@ -118,6 +124,16 @@ bool KillSwitch::setConnectionProtection(bool enabled, const QJsonObject &config
     return true;
 #endif
 }
+
+#ifdef Q_OS_MACOS
+void KillSwitch::endClientSession()
+{
+    m_connectionProtection = false;
+    m_alwaysBlockedSites.clear();
+    m_allowedRanges.clear();
+    MacOSFirewall::uninstall();
+}
+#endif
 
 bool KillSwitch::disableKillSwitch() {
     if (m_connectionProtection) {
@@ -226,7 +242,7 @@ void KillSwitch::applyAlwaysBlockedSites()
     MacOSFirewall::setAnchorEnabled(QStringLiteral("120.blockNets"), true);
     MacOSFirewall::setAnchorTable(QStringLiteral("120.blockNets"), true, QStringLiteral("blocknets"), m_alwaysBlockedSites);
     qInfo() << "KillSwitch::applyAlwaysBlockedSites applied count=" << m_alwaysBlockedSites.size();
-    MacOSFirewall::setAnchorEnabled(QStringLiteral("200.allowVPN"), true);
+    MacOSFirewall::setAnchorEnabled(QStringLiteral("200.allowVPN"), false);
     MacOSFirewall::setAnchorEnabled(QStringLiteral("250.blockIPv6"), false);
     MacOSFirewall::setAnchorEnabled(QStringLiteral("290.allowDHCP"), false);
     MacOSFirewall::setAnchorEnabled(QStringLiteral("300.allowLAN"), false);

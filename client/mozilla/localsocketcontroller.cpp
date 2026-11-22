@@ -29,6 +29,7 @@
 #include "core/protocols/protocolUtils.h"
 #include "core/utils/constants/configKeys.h"
 #include "core/utils/constants/protocolConstants.h"
+#include "core/utils/routeModes.h"
 
 // How many times do we try to reconnect.
 constexpr int MAX_CONNECTION_RETRY = 10;
@@ -260,7 +261,9 @@ void LocalSocketController::activate(const QJsonObject &rawConfig) {
   }
 
   json.insert("excludedAddresses", jsExcludedAddresses);
-  json.insert("splitTunnelDnsRules", splitTunnelDnsRules);
+  if (splitTunnelType == amnezia::RouteMode::VpnAllExceptSites) {
+    json.insert("splitTunnelDnsRules", splitTunnelDnsRules);
+  }
 
   json.insert("vpnDisabledApps", splitTunnelApps);
 

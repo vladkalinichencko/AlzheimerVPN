@@ -7,6 +7,11 @@ IpcClient::IpcClient(QObject *parent) : QObject(parent)
 {
     m_node.connectToNode(QUrl("local:" + amnezia::getIpcServiceUrl()));
     m_interface.reset(m_node.acquire<IpcInterfaceReplica>());
+    connect(m_interface.data(), &IpcInterfaceReplica::stateChanged, this, [this](QRemoteObjectReplica::State state) {
+        if (state == QRemoteObjectReplica::Valid) {
+            emit serviceAvailable();
+        }
+    });
 }
 
 IpcClient& IpcClient::Instance()

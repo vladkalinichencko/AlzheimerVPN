@@ -18,6 +18,7 @@
 #include "logger.h"
 
 #include "killswitch.h"
+#include <QSignalBlocker>
 
 constexpr const int WG_TUN_PROC_TIMEOUT = 5000;
 #ifndef AMNEZIA_WG_RUNTIME_DIR
@@ -72,7 +73,9 @@ void WireguardUtilsMacos::tunnelStdoutReady() {
 
 void WireguardUtilsMacos::tunnelErrorOccurred(QProcess::ProcessError error) {
   logger.warning() << "Tunnel process encountered an error:" << error;
-  emit backendFailure();
+  if (error == QProcess::Crashed) {
+    emit backendFailure();
+  }
 }
 
 bool WireguardUtilsMacos::addInterface(const InterfaceConfig& config) {
@@ -231,6 +234,11 @@ bool WireguardUtilsMacos::addInterface(const InterfaceConfig& config) {
       if (!config.m_secondaryDnsServer.isEmpty()) {
           params.dnsServers.append(config.m_secondaryDnsServer);
       }
+      for (const QString& dnsServer : config.m_allowedDnsServers) {
+        if (QHostAddress(dnsServer).protocol() == QAbstractSocket::IPv4Protocol) {
+          params.dnsServers.append(dnsServer);
+        }
+      }
 
       if (config.m_allowedIPAddressRanges.contains(IPAddress("0.0.0.0/0"))) {
           params.blockAll = true;
@@ -266,6 +274,7 @@ bool WireguardUtilsMacos::deleteInterface() {
   }
 
   // Attempt to terminate gracefully.
+  const QSignalBlocker blocker(&m_tunnel);
   m_tunnel.terminate();
   if (!m_tunnel.waitForFinished(WG_TUN_PROC_TIMEOUT)) {
     m_tunnel.kill();

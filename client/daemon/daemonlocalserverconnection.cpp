@@ -120,6 +120,9 @@ void DaemonLocalServerConnection::parseCommand(const QByteArray& data) {
 
     if (!Daemon::instance()->activate(config)) {
       logger.error() << "Failed to activate the interface";
+#ifdef Q_OS_MACOS
+      Daemon::instance()->deactivate(false);
+#endif
       backendFailure(DaemonError::ERROR_FATAL);
     }
     return;

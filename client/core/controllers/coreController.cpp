@@ -178,6 +178,8 @@ void CoreController::initCoreControllers()
     m_exportController = new ExportController(m_serversRepository, m_appSettingsRepository, this);
     m_importCoreController = new ImportController(m_serversRepository, m_appSettingsRepository, this);
     m_connectionController = new ConnectionController(m_serversRepository, m_appSettingsRepository, m_vpnConnection.get(), this);
+    connect(m_connectionController, &ConnectionController::connectionStateChanged, m_ipSplitTunnelingController,
+            [this](Vpn::ConnectionState state) { m_ipSplitTunnelingController->setVpnConnected(state == Vpn::Connected); });
     m_settingsController = new SettingsController(m_serversRepository, m_appSettingsRepository, this);
     m_localProxyController = new LocalProxyController(m_serversRepository, m_appSettingsRepository, m_subscriptionController, this);
 }

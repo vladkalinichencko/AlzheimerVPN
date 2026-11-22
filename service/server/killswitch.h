@@ -23,6 +23,9 @@ public:
     bool removeAllowedRange(const QStringList &ranges);
     bool isStrictKillSwitchEnabled();
     bool setAlwaysBlockedSites(const QStringList &ranges);
+#ifdef Q_OS_MACOS
+    void endClientSession();
+#endif
 
 private:
     KillSwitch(QObject* parent) {};

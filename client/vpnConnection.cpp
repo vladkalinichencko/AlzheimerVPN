@@ -124,7 +124,8 @@ VpnConnection::VpnConnection(SecureServersRepository* serversRepository, SecureA
       m_healthTimer(this),
       m_connectedRecoveryTimer(this),
       m_pendingNetworkTimer(this),
-      m_pendingNetworkDeadlineTimer(this)
+      m_pendingNetworkDeadlineTimer(this),
+      m_alwaysBlockedSyncDebounce(this)
 {
     m_connectingTimer.setSingleShot(true);
     m_connectingTimer.setInterval(30000);
@@ -490,6 +491,8 @@ void VpnConnection::sendAlwaysBlockedSites()
         return;
     }
 
+    connect(&IpcClient::Instance(), &IpcClient::serviceAvailable,
+            this, &VpnConnection::syncAlwaysBlockedSites, Qt::UniqueConnection);
     // Same condition and same site list as the "VPN only for listed sites" kill switch,
     // but the service applies it while the VPN is off too.
     QStringList blocked;
@@ -497,7 +500,6 @@ void VpnConnection::sendAlwaysBlockedSites()
         blocked = SplitTunnelRoutePlanner::cachedSiteIps(
             m_appSettingsRepository->vpnSites(amnezia::RouteMode::VpnOnlyForwardSites));
     }
-    qInfo() << "VpnConnection::syncAlwaysBlockedSites blocked_ips=" << blocked.count();
     IpcClient::withInterface([this, blocked](QSharedPointer<IpcInterfaceReplica> iface) {
         IpcClient::async(this, iface->setAlwaysBlockedSites(blocked), [](bool ok) {
             if (!ok) {
@@ -746,10 +748,10 @@ void VpnConnection::connectToVpn(const QString &serverId, DockerContainer contai
 #if defined(Q_OS_MACOS) && !defined(MACOS_NE)
     QJsonObject firewallConfig = m_vpnConfiguration;
     firewallConfig.insert("vpnServer", m_remoteAddress);
+    m_connectionProtectionActive = m_appSettingsRepository->isKillSwitchEnabled();
     const bool protectedConnection = IpcClient::withInterface(
         [this, firewallConfig](QSharedPointer<IpcInterfaceReplica> iface) {
-            auto reply = iface->setConnectionProtection(
-                m_appSettingsRepository->isKillSwitchEnabled(), firewallConfig);
+            auto reply = iface->setConnectionProtection(m_connectionProtectionActive, firewallConfig);
             return reply.waitForFinished(kIpcReplyTimeoutMsecs) && reply.returnValue();
         });
     if (!protectedConnection) {
@@ -759,7 +761,6 @@ void VpnConnection::connectToVpn(const QString &serverId, DockerContainer contai
         emit vpnProtocolError(ErrorCode::AmneziaServiceConnectionFailed);
         return;
     }
-    m_connectionProtectionActive = m_appSettingsRepository->isKillSwitchEnabled();
 #endif
 
 #ifdef AMNEZIA_DESKTOP
@@ -1235,7 +1236,6 @@ void VpnConnection::startSilentReconnect()
 
 void VpnConnection::disconnectFromVpn()
 {
-    releaseConnectionProtection();
 #if defined(Q_OS_IOS) || defined(MACOS_NE)
     // iOS/macOS NE use IosController directly; m_vpnProtocol is not set there.
     IosController::Instance()->disconnectVpn();
