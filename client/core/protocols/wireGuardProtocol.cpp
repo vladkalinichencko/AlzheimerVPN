@@ -72,6 +72,8 @@ bool WireguardProtocol::requestStatus()
 
 ErrorCode WireguardProtocol::startMzImpl()
 {
+    m_routeGateway = NetworkUtilities::getGatewayAndIface().first;
+
     const QString protocolName = ProtocolUtils::protoToString(m_proto);
     QJsonObject vpnConfigData = m_rawConfig.value(ProtocolUtils::key_proto_config_data(m_proto)).toObject();
     vpnConfigData[configKey::hostName] = NetworkUtilities::getIPAddress(vpnConfigData.value(configKey::hostName).toString());
